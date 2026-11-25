@@ -100,6 +100,35 @@ def test_no_reserved_i18n_keys():
 （`:root`、`:root[data-theme="dark"]`、`prefers-color-scheme: dark` ブロック）で `--accent`・`--accent-ink`・`--accent-weak` を上書きします
 （`templates/static/style.css` 参照）。ベンダー領域は `--vendor-accent`（常にブランドブルー）を使い、上書きしません。
 
+### 拡張ポイント
+
+いずれも任意です。製品は標準ルートを作り直さず、これらを渡します。
+
+- デバイスキー：`key_type`（既定は `device_key` フィールドの型、`int` か `str`）でパスパラメーターを変換します
+  —— `make_base_app(engine, device_key="device_id")` は `/api/devices/1001/config` を `1001` として扱います。
+- `create_hook(engine, body) -> dict`：新規デバイスを検証前に補完します
+  （`create_hook=lambda e, b: {**b, "device_id": b.get("device_id") or free_id(e)}`）。
+- `duplicate_hook(engine, dev, new_key, body) -> dict`：「既に存在する」チェックの前に呼ばれ、キーを変更できます
+  （`duplicate_hook=lambda e, d, k, b: {**d, "unit": free_unit(e)}`）。フックなしの場合、複製のキーは
+  `{key}_copy`（`str` キー）または最大値 + 1（`int` キー）です。
+- `simulation_hook(engine, rest) -> dict | None`：`POST /api/simulation` の `running` / `time_scale` 以外の
+  フィールドを受け取り、dict の戻り値はレスポンスにマージされます（`simulation_hook=lambda e, rest: e.apply_set_time(rest)`）。
+- `import_hooks={".csv": import_ede, ".zip": import_ede, ".yaml": import_text}`（`POST /api/config/import`）：
+  `hook(engine, files: dict[name, bytes]) -> (config | None, messages[, config_text])`。`.xlsx`（およびその他の拡張子）は
+  従来どおり `XlsxSchema` が処理します。イベントログには警告件数と先頭 5 件が記録されます。
+- `add_common_args(ap, ..., open_browser=False)`：既定でブラウザーを開きません（`--browser` で開く。`--no-browser` も残ります）。
+- `engine.wake()`：模擬時間を進めず、tick のリズムも崩さずに `_on_tick`（スキャン・プッシュ）を 1 回すぐ実行します。
+  スレッドセーフです（`stack.on_write = lambda *a: engine.wake()`）。
+- `BaseEngine` サブクラスの `logger_name = "sme_my_sim.engine"`：`self.logger` の名前になり、エンジン内部のログはすべてこれを使います。
+
+### 移行時の注意
+
+- `state` は `BaseEngine` のインスタンス属性（`_build` の結果）です。サブクラスで `state()` メソッドを定義してはいけません。
+- `BaseEngine.event_history(limit)` は共通イベントログです。製品独自の履歴（例：ポイントごとの
+  `history(device_id, key)` API）とは衝突しません。
+- `product_routers` に渡した FastAPI `APIRouter` のルートは `app.routes` に平坦に展開されます（`include_router` で
+  包みません）。`APIRoute` のままなので依存性注入は通常どおり使えます。
+
 ### テストとパッケージング
 
 - pytest プラグイン（asyncio タイムアウト＋ハングダンプ）は `pytest11` エントリーポイントで自動的に有効になります。
@@ -122,7 +151,7 @@ def test_no_reserved_i18n_keys():
 | 製品 | `--accent` | `--accent-ink` | `--accent-weak` | ダークテーマ |
 |---|---|---|---|---|
 | SME BACnetSim | `#087def`（ブランドブルー、シェル既定） | `#fff` | `#e7f2fe` | シェル既定（`#3d9bff` / `#fff` / `#11304f`） |
-| SME ModbusSim | `#0f766e`（ティール） | `#ffffff` | `#ccfbf1` | 未定 |
+| SME ModbusSim | `#0f766e`（ティール） | `#ffffff` | `#ccfbf1` | `#2dd4bf` / `#042f2e` / `#134e4a` |
 | OCPP シミュレーター | 未定 | 未定 | 未定 | 未定 |
 | SME SerialHub | 未定 | 未定 | 未定 | 未定 |
 

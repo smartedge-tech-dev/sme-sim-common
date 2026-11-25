@@ -105,6 +105,37 @@ overrides `--accent`, `--accent-ink` and `--accent-weak` in three blocks of its 
 `templates/static/style.css`. The vendor area uses `--vendor-accent` (always brand blue) and must not be
 overridden.
 
+### Extension points
+
+All optional; products pass them instead of re-implementing the standard routes.
+
+- Device keys: `key_type` (default: the type of the `device_key` field, `int` or `str`) converts the path
+  parameter — `make_base_app(engine, device_key="device_id")` reads `/api/devices/1001/config` as `1001`.
+- `create_hook(engine, body) -> dict` completes a new device before validation:
+  `create_hook=lambda e, b: {**b, "device_id": b.get("device_id") or free_id(e)}`.
+- `duplicate_hook(engine, dev, new_key, body) -> dict` runs before the "already exists" check and may change the
+  key: `duplicate_hook=lambda e, d, k, b: {**d, "unit": free_unit(e)}`. Without a hook the copy is keyed
+  `{key}_copy` (`str` keys) or largest key + 1 (`int` keys).
+- `simulation_hook(engine, rest) -> dict | None` gets the `POST /api/simulation` fields other than `running` /
+  `time_scale`; a dict result is merged into the response: `simulation_hook=lambda e, rest: e.apply_set_time(rest)`.
+- `import_hooks={".csv": import_ede, ".zip": import_ede, ".yaml": import_text}` for `POST /api/config/import`:
+  `hook(engine, files: dict[name, bytes]) -> (config | None, messages[, config_text])`; `.xlsx` (and any other
+  extension) still goes to the `XlsxSchema`. The event log records the warning count and the first 5 warnings.
+- `add_common_args(ap, ..., open_browser=False)`: do not open the browser by default (`--browser` opens it,
+  `--no-browser` is kept).
+- `engine.wake()`: run one `_on_tick` (scan / push) now, without advancing simulated time or shifting the tick
+  schedule; thread-safe: `stack.on_write = lambda *a: engine.wake()`.
+- `logger_name = "sme_my_sim.engine"` on a `BaseEngine` subclass names `self.logger`, used for all engine logging.
+
+### Migration notes
+
+- `state` is an instance attribute of `BaseEngine` (the result of `_build`); a subclass must not define a
+  `state()` method.
+- `BaseEngine.event_history(limit)` is the common event log; it does not clash with a product's own history
+  (e.g. a per-point `history(device_id, key)` API).
+- The routes of a FastAPI `APIRouter` passed in `product_routers` are flattened into `app.routes` (no
+  `include_router` wrapper); they remain `APIRoute`s, dependency injection works as usual.
+
 ### Tests and packaging
 
 - The pytest plugin (asyncio timeout + hang dump) is activated automatically through the `pytest11`
@@ -128,7 +159,7 @@ Default web UI ports, so that sibling products can run side by side. New product
 | Product | `--accent` | `--accent-ink` | `--accent-weak` | Dark theme |
 |---|---|---|---|---|
 | SME BACnetSim | `#087def` (brand blue, shell default) | `#fff` | `#e7f2fe` | shell default (`#3d9bff` / `#fff` / `#11304f`) |
-| SME ModbusSim | `#0f766e` (teal) | `#ffffff` | `#ccfbf1` | TBD |
+| SME ModbusSim | `#0f766e` (teal) | `#ffffff` | `#ccfbf1` | `#2dd4bf` / `#042f2e` / `#134e4a` |
 | OCPP simulator | TBD | TBD | TBD | TBD |
 | SME SerialHub | TBD | TBD | TBD | TBD |
 

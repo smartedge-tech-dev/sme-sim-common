@@ -65,14 +65,18 @@ def bad(status: int, msg: Union[str, BaseException], *, errors: Optional[List[st
 
 def error_response(request, exc: HTTPException):
     """JSON body for an ``HTTPException``: ``{"detail": ..., "error": message}``. ``detail`` keeps the FastAPI
-    shape the existing UIs read; ``error`` is the design §7.2 field."""
+    shape the existing UIs read; ``error`` is the design §7.2 field. When the detail carries ``errors``
+    (``bad(..., errors=[...])``) they are also put at the top level (``{"errors": [...]}``)."""
     from starlette.responses import JSONResponse, Response
 
     if exc.status_code in (204, 304):
         return Response(status_code=exc.status_code, headers=exc.headers)
     detail = exc.detail
     msg = detail.get("message", "") if isinstance(detail, dict) else str(detail)
-    return JSONResponse({"detail": detail, "error": msg}, status_code=exc.status_code, headers=exc.headers)
+    body = {"detail": detail, "error": msg}
+    if isinstance(detail, dict) and "errors" in detail:
+        body["errors"] = detail["errors"]
+    return JSONResponse(body, status_code=exc.status_code, headers=exc.headers)
 
 
 def _list_item_model(model_cls, attr: str):
@@ -91,14 +95,41 @@ def _list_item_model(model_cls, attr: str):
     return None
 
 
+def _key_type(item_model, attr: str) -> type:
+    """``int`` or ``str``: the type of the device key field ``attr`` of ``item_model`` (``Optional`` unwrapped;
+    ``str`` when unknown)."""
+    from typing import get_args
+
+    f = getattr(item_model, "model_fields", {}).get(attr) if item_model is not None else None
+    stack = [f.annotation] if f is not None else []
+    while stack:
+        t = stack.pop()
+        if t is int or t is str:
+            return t
+        stack.extend(get_args(t))
+    return str
+
+
+async def _call(fn, *args):
+    """Call a product hook; sync or async."""
+    import inspect
+
+    res = fn(*args)
+    if inspect.isawaitable(res):
+        res = await res
+    return res
+
+
 def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
                   static_dir: Optional[Union[str, Path]] = None, product_routers=(),
                   features: Optional[dict] = None, title: str = "SME Sim", version: Optional[str] = None,
                   config_model: Optional[type] = None, xlsx=None, templates=None,
                   devices_attr: str = "devices", device_key: str = "name", device_model: Optional[type] = None,
-                  duplicate_hook=None, manage_engine: bool = True):
+                  duplicate_hook=None, manage_engine: bool = True, key_type: Optional[type] = None,
+                  create_hook=None, simulation_hook=None, import_hooks: Optional[dict] = None):
     """FastAPI app with the standard routes; the product adds its protocol routes through ``product_routers``
     (FastAPI ``APIRouter`` objects, Starlette ``Router`` objects, or plain route objects; matched before the mounts).
+    Their routes are flattened into ``app.routes`` (FastAPI ``APIRoute`` objects, dependency injection intact).
 
     ``engine`` follows :class:`sme_sim_common.engine.EngineProtocol`. Always present: ``GET /``, ``/static``
     (when ``static_dir`` exists), ``/sme-sim-common``, ``GET /api/version``, ``GET /api/state``,
@@ -106,15 +137,27 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
     ``WS /ws``. Per feature:
 
     * ``xlsx`` (needs ``xlsx=XlsxSchema``): ``GET /api/config/xlsx``, ``GET /api/config/xlsx-template``,
-      ``POST /api/config/import`` (multipart field ``file``)
+      ``POST /api/config/import`` (multipart field ``file``). ``import_hooks`` maps file extensions
+      (``".csv"``, ``".yaml"`` ...) to ``hook(engine, files: dict[filename, bytes]) -> (config | None, messages)``
+      or ``(config, messages, config_text)`` (sync or async); the extension of the first ``file`` part picks the
+      hook and every ``file`` part is passed. ``config`` ``None`` = ``messages`` are errors (400). Other files go
+      to ``xlsx``. ``POST /api/config/import`` exists when ``xlsx`` is on or ``import_hooks`` is given.
     * ``templates`` (needs ``templates=TemplateRegistry``): ``GET /api/templates``, ``POST /api/templates/reload``,
       ``POST /api/templates/from-device/{device}``
     * ``devices`` (a device = one item of the config's top-level list ``devices_attr``, identified by
       ``device_key``): ``POST /api/devices``, ``POST /api/devices/{name}/duplicate``, ``DELETE /api/devices/{name}``,
       ``GET|PUT /api/devices/{name}/config``. Edits re-dump the config (``exclude_unset``; comments are lost) and
-      reload it. ``duplicate_hook(engine, dev: dict, new_name, body: dict) -> dict`` adjusts the copy (e.g. a
-      free Modbus unit id).
-    * ``simulation`` (engine has ``set_running``): ``POST /api/simulation`` ``{"running", "time_scale"}``
+      reload it. The ``{name}`` path parameter is converted to ``key_type`` (default: the type of the
+      ``device_key`` field of the device model, ``int`` or ``str``). ``create_hook(engine, body: dict) -> dict``
+      completes a new device before validation (e.g. a free key). ``duplicate_hook(engine, dev: dict, new_key,
+      body: dict) -> dict`` adjusts the copy (e.g. a free Modbus unit id) and may change its key; it runs before
+      the "key already exists" check. Without a hook the copy's key is ``body["name"]`` (or ``body[device_key]``)
+      or, for ``str`` keys, ``{key}_copy`` / ``{key}_copy2`` ..., for ``int`` keys the largest key + 1.
+      Responses carry the key as ``name``.
+    * ``simulation`` (engine has ``set_running``): ``POST /api/simulation`` ``{"running", "time_scale"}``.
+      ``simulation_hook(engine, rest: dict) -> dict | None`` (sync or async) receives the other fields after
+      ``running`` / ``time_scale`` were applied (``set_running`` is then skipped when neither is given); a dict
+      result is merged into the response.
 
     ``features`` maps a feature name to ``False`` to switch it off (default: on when its dependency is given).
     ``config_model`` defaults to ``type(engine.config)``, ``config_path`` to ``engine.config_path``.
@@ -212,12 +255,20 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
     if on["simulation"]:
         async def simulation(request: Request):
             body = await json_object(request)
+            std = ("running", "time_scale")
+            rest = {k: v for k, v in body.items() if k not in std}
+            extra = None
             try:
-                engine.set_running(body.get("running"), body.get("time_scale"))
+                if simulation_hook is None or any(k in body for k in std):
+                    engine.set_running(body.get("running"), body.get("time_scale"))
+                if simulation_hook is not None:
+                    extra = await _call(simulation_hook, engine, rest)
             except (TypeError, ValueError) as e:
                 raise bad(400, e) from None
-            return JSONResponse({"running": getattr(engine, "running", None),
-                                 "time_scale": getattr(engine, "time_scale", None)})
+            resp = {"running": getattr(engine, "running", None), "time_scale": getattr(engine, "time_scale", None)}
+            if isinstance(extra, dict):
+                resp.update(extra)
+            return JSONResponse(resp)
 
         routes.append(Route("/api/simulation", simulation, methods=["POST"]))
 
@@ -246,24 +297,50 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
             except XlsxUnavailable as e:
                 raise bad(501, e) from None
 
+        routes += [Route("/api/config/xlsx", config_xlsx),
+                   Route("/api/config/xlsx-template", config_xlsx_template)]
+
+    # ---- import (xlsx and / or the product's import_hooks, chosen by file extension)
+
+    hooks = {(k if k.startswith(".") else f".{k}").lower(): v for k, v in (import_hooks or {}).items()}
+    if on["xlsx"] or hooks:
         async def config_import(request: Request):
             form = await request.form()
-            file = form.get("file")
-            if not isinstance(file, UploadFile):
-                raise bad(400, "multipart field 'file' (the .xlsx workbook) is required")
-            cfg, msgs = xlsx.import_xlsx(await file.read(), engine.config)
+            files = [f for f in form.getlist("file") if isinstance(f, UploadFile)]
+            if not files:
+                raise bad(400, "multipart field 'file' (the file to import) is required")
+            first = files[0]
+            ext = Path(first.filename or "").suffix.lower()
+            text = None
+            if ext in hooks:
+                uploads = {(f.filename or f"upload-{i}"): await f.read() for i, f in enumerate(files)}
+                try:
+                    res = tuple(await _call(hooks[ext], engine, uploads))
+                except HTTPException:
+                    raise
+                except Exception as e:  # parse / decode / zip errors of the product's importer
+                    raise bad(400, e) from None
+                cfg, msgs = res[0], res[1]
+                text = res[2] if len(res) > 2 else None
+                what = f"configuration imported from {', '.join(uploads)}"
+            elif on["xlsx"]:
+                cfg, msgs = xlsx.import_xlsx(await first.read(), engine.config)
+                what = f"Excel workbook imported ({first.filename})"
+            else:
+                raise bad(400, f"cannot import {first.filename or 'the file'!r}: supported {', '.join(sorted(hooks))}")
+            msgs = [str(m) for m in (msgs or [])]
             if cfg is None:
-                raise bad(400, f"{len(msgs)} error(s) in {file.filename or 'the workbook'}", errors=msgs)
+                raise bad(400, f"{len(msgs)} error(s) in {first.filename or 'the workbook'}", errors=msgs)
             try:
-                await engine.reload(cfg, to_yaml(cfg))
+                await engine.reload(cfg, text if text is not None else to_yaml(cfg))
             except Exception as e:
                 raise bad(400, "the imported configuration cannot be applied", errors=[str(e)]) from None
-            engine.log_event("config", f"Excel workbook imported ({file.filename})")
+            if msgs:
+                what += f", {len(msgs)} warning(s): " + "; ".join(msgs[:5]) + (" ..." if len(msgs) > 5 else "")
+            engine.log_event("config", what)
             return JSONResponse({"ok": True, "warnings": msgs})
 
-        routes += [Route("/api/config/xlsx", config_xlsx),
-                   Route("/api/config/xlsx-template", config_xlsx_template),
-                   Route("/api/config/import", config_import, methods=["POST"])]
+        routes.append(Route("/api/config/import", config_import, methods=["POST"]))
 
     # ---- devices (= items of the top-level list ``devices_attr``)
 
@@ -273,9 +350,19 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
     def device_key_of(d) -> Any:
         return d.get(device_key) if isinstance(d, dict) else getattr(d, device_key, None)
 
+    ktype = key_type or _key_type(item_model, device_key)
+
     def device_or_404(name: str):
+        if ktype is str:
+            match = lambda k: str(k) == name  # noqa: E731
+        else:
+            try:
+                key = ktype(name)
+            except (TypeError, ValueError):
+                raise bad(404, f"unknown device {name!r}") from None
+            match = lambda k: k == key  # noqa: E731
         for i, d in enumerate(device_items()):
-            if str(device_key_of(d)) == name:
+            if match(device_key_of(d)):
                 return i, d
         raise bad(404, f"unknown device {name!r}")
 
@@ -324,9 +411,23 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
                    Route("/api/templates/from-device/{device}", template_from_device, methods=["POST"])]
 
     if on["devices"]:
-        def name_free(name: Any, skip: Optional[str] = None) -> None:
-            if any(device_key_of(d) == name and str(device_key_of(d)) != skip for d in device_items()):
+        def name_free(name: Any, skip_index: Optional[int] = None) -> None:
+            if any(device_key_of(d) == name and j != skip_index for j, d in enumerate(device_items())):
                 raise bad(409, f"device {name!r} already exists")
+
+        def coerce_key(value: Any) -> Any:
+            if ktype is str or isinstance(value, ktype):
+                return value
+            try:
+                return ktype(value)
+            except (TypeError, ValueError):
+                raise bad(400, f"{device_key}: {value!r} is not a valid {ktype.__name__}") from None
+
+        async def run_hook(fn, *args):
+            try:
+                return await _call(fn, *args)
+            except (TypeError, ValueError, KeyError) as e:
+                raise bad(400, e) from None
 
         def parse_device(data: Any) -> dict:
             if not isinstance(data, dict):
@@ -346,24 +447,43 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
             await apply(cfg, to_yaml(cfg))
 
         async def device_create(request: Request):
-            dev = parse_device(await json_object(request, "a device object"))
-            name_free(dev.get(device_key))
+            body = await json_object(request, "a device object")
+            if create_hook is not None:
+                body = await run_hook(create_hook, engine, body)
+            dev = parse_device(body)
+            key = dev.get(device_key)
+            name_free(key)
             await apply_devices([dump_item(d) for d in device_items()] + [dev])
-            engine.log_event("config", f"device {dev.get(device_key)} added")
-            return JSONResponse({"ok": True, "name": dev.get(device_key), "device": dev})
+            engine.log_event("config", f"device {key} added")
+            return JSONResponse({"ok": True, "name": key, "device": dev})
 
         async def device_duplicate(request: Request):
             device = request.path_params["device"]
             _, src = device_or_404(device)
             body = await json_object(request)
-            names = {str(device_key_of(d)) for d in device_items()}
-            name = body.get("name") or next(
-                n for n in (f"{device}_copy", *(f"{device}_copy{i}" for i in range(2, 10000))) if n not in names)
-            name_free(name)
+            keys = [device_key_of(d) for d in device_items()]
+            requested = body.get(device_key)
+            if requested in (None, "") and ktype is str:
+                requested = body.get("name")
+            if requested not in (None, ""):
+                name = coerce_key(requested)
+            elif ktype is str:
+                base, names = str(device_key_of(src)), {str(k) for k in keys}
+                name = next(n for n in (f"{base}_copy", *(f"{base}_copy{i}" for i in range(2, 10000)))
+                            if n not in names)
+            else:
+                name = max((k for k in keys if isinstance(k, ktype)), default=0) + 1
             dev = {**dump_item(src), device_key: name}
             if duplicate_hook is not None:
-                dev = duplicate_hook(engine, dev, name, body)
+                res = await run_hook(duplicate_hook, engine, dev, name, body)
+                if res is not None:
+                    dev = res
+            if not isinstance(dev, dict):
+                raise bad(400, "duplicate_hook must return a device object")
+            name = dev.get(device_key, name)
+            name_free(name)
             dev = parse_device(dev)
+            name = dev.get(device_key)
             await apply_devices([dump_item(d) for d in device_items()] + [dev])
             engine.log_event("config", f"device {device} duplicated as {name}")
             return JSONResponse({"ok": True, "name": name, "device": dev})
@@ -383,19 +503,19 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
 
         async def device_config_put(request: Request):
             device = request.path_params["device"]
-            i, _ = device_or_404(device)
+            i, old = device_or_404(device)
             try:
                 data = yaml.safe_load((await request.body()).decode("utf-8"))
             except yaml.YAMLError as e:
                 raise bad(400, f"invalid YAML: {e}") from None
             dev = parse_device(data)
-            name_free(dev.get(device_key), skip=device)
+            new = dev.get(device_key)
+            name_free(new, skip_index=i)
             items = [dump_item(d) for d in device_items()]
             items[i] = dev
             await apply_devices(items)
-            new = dev.get(device_key)
             engine.log_event("config", f"device {device} updated"
-                                       + (f" (renamed to {new})" if str(new) != device else ""))
+                                       + (f" (renamed to {new})" if new != device_key_of(old) else ""))
             return JSONResponse({"ok": True, "name": new})
 
         routes += [Route("/api/devices", device_create, methods=["POST"]),
@@ -455,12 +575,10 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
 
     routes.append(Route("/", index))
 
-    from fastapi import APIRouter
-
-    api_routers = [r for r in product_routers if isinstance(r, APIRouter)]
+    # APIRouter / Router routes are flattened into app.routes (no include_router wrapper): FastAPI APIRoute
+    # objects keep their prefix, dependencies and validation.
     for r in product_routers:
-        if not isinstance(r, APIRouter):
-            routes.extend(getattr(r, "routes", None) or [r])
+        routes.extend(getattr(r, "routes", None) or [r])
 
     @asynccontextmanager
     async def lifespan(_app):
@@ -474,8 +592,6 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
 
     app = FastAPI(title=title, version=version or "0", routes=routes, lifespan=lifespan,
                   exception_handlers={HTTPException: error_response})
-    for r in api_routers:
-        app.include_router(r)
     app.state.engine = engine
     app.state.features = on
     mount_common(app)

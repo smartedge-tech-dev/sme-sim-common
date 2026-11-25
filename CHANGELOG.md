@@ -22,6 +22,19 @@ First release. The API below is the 1.x compatibility promise.
   passed as `APIRouter`, Starlette `Router` or route lists via `product_routers`.
 - `engine`: `EngineProtocol` and `BaseEngine` (event log with `event_history(limit)`, subscribe / publish
   fan-out, simulation clock).
+- `web.make_base_app` extension points: `key_type` (device key type, inferred from the `device_key` field;
+  path parameters are converted), `create_hook(engine, body)`, `duplicate_hook` called before the
+  "already exists" check and allowed to change the key (default new key: `{key}_copy` for `str`, largest + 1
+  for `int`), `simulation_hook(engine, rest)` for extra `POST /api/simulation` fields (result merged into the
+  response), `import_hooks` (`POST /api/config/import` dispatched by file extension; `.xlsx` stays on the
+  `XlsxSchema`; the event log records the warning count and the first 5 warnings).
+- `web`: FastAPI `APIRouter` routes in `product_routers` are flattened into `app.routes` (still `APIRoute`, no
+  `include_router` wrapper); error bodies with row errors also carry a top-level `errors` (`detail.errors` kept).
+- `engine`: `BaseEngine.wake()` (thread-safe immediate `_on_tick` without advancing simulated time),
+  `BaseEngine.logger_name` / `self.logger` for all engine logging, `EngineProtocol.config_path` typed
+  `Union[str, Path, None]`.
+- `cli`: `add_common_args(..., open_browser=True)` and `--browser` next to `--no-browser`.
+- `common.js`: `common.config.export_xlsx` (en / ja / zh).
 - `behaviors`: behavior definitions and compilation.
 - `templates`: `TemplateRegistry` (built-in and user device templates, `--templates-dir`).
 - `xlsx`: `XlsxSchema` (Excel export / import / blank template; extra `[xlsx]`).

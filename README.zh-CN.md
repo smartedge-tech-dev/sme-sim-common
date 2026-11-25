@@ -100,6 +100,34 @@ def test_no_reserved_i18n_keys():
 （`:root`、`:root[data-theme="dark"]` 和 `prefers-color-scheme: dark` 块）覆盖 `--accent`、`--accent-ink`、`--accent-weak`
 （见 `templates/static/style.css`）。厂商区域使用 `--vendor-accent`（始终为品牌蓝），不得覆盖。
 
+### 扩展点
+
+均为可选；产品传入这些参数，而不是重写标准路由。
+
+- 设备 key：`key_type`（默认取 `device_key` 字段的类型，`int` 或 `str`）用于转换路径参数
+  —— `make_base_app(engine, device_key="device_id")` 把 `/api/devices/1001/config` 解析为 `1001`。
+- `create_hook(engine, body) -> dict`：在校验前补全新设备
+  （`create_hook=lambda e, b: {**b, "device_id": b.get("device_id") or free_id(e)}`）。
+- `duplicate_hook(engine, dev, new_key, body) -> dict`：在「已存在」检查之前调用，可以改 key
+  （`duplicate_hook=lambda e, d, k, b: {**d, "unit": free_unit(e)}`）。无 hook 时副本的 key 为
+  `{key}_copy`（`str` key）或当前最大值 + 1（`int` key）。
+- `simulation_hook(engine, rest) -> dict | None`：接收 `POST /api/simulation` 中 `running` / `time_scale` 以外的字段，
+  返回的 dict 合并进响应（`simulation_hook=lambda e, rest: e.apply_set_time(rest)`）。
+- `import_hooks={".csv": import_ede, ".zip": import_ede, ".yaml": import_text}`（`POST /api/config/import`）：
+  `hook(engine, files: dict[name, bytes]) -> (config | None, messages[, config_text])`；`.xlsx`（及其它扩展名）仍由
+  `XlsxSchema` 处理。事件日志记录 warning 件数和前 5 条。
+- `add_common_args(ap, ..., open_browser=False)`：默认不打开浏览器（`--browser` 强制打开，`--no-browser` 保留）。
+- `engine.wake()`：立即执行一轮 `_on_tick`（扫描、推送），不推进模拟时间、不打乱 tick 节奏；线程安全
+  （`stack.on_write = lambda *a: engine.wake()`）。
+- `BaseEngine` 子类的 `logger_name = "sme_my_sim.engine"`：作为 `self.logger` 的名字，引擎内部日志全部走它。
+
+### 迁移注意事项
+
+- `state` 是 `BaseEngine` 的实例属性（`_build` 的结果）；子类不能定义 `state()` 方法。
+- `BaseEngine.event_history(limit)` 是共通事件日志，与产品自身的 history（如按点的 `history(device_id, key)` API）不冲突。
+- `product_routers` 中 FastAPI `APIRouter` 的路由被平铺进 `app.routes`（不经 `include_router` 包一层）；
+  它们仍是 `APIRoute`，依赖注入照常可用。
+
 ### 测试与打包
 
 - pytest 插件（asyncio 超时 + 挂起转储）通过 `pytest11` entry point 自动启用。
@@ -122,7 +150,7 @@ def test_no_reserved_i18n_keys():
 | 产品 | `--accent` | `--accent-ink` | `--accent-weak` | 暗色主题 |
 |---|---|---|---|---|
 | SME BACnetSim | `#087def`（品牌蓝，外壳默认） | `#fff` | `#e7f2fe` | 外壳默认（`#3d9bff` / `#fff` / `#11304f`） |
-| SME ModbusSim | `#0f766e`（teal） | `#ffffff` | `#ccfbf1` | 待定 |
+| SME ModbusSim | `#0f766e`（teal） | `#ffffff` | `#ccfbf1` | `#2dd4bf` / `#042f2e` / `#134e4a` |
 | OCPP 模拟器 | 待定 | 待定 | 待定 | 待定 |
 | SME SerialHub | 待定 | 待定 | 待定 | 待定 |
 

@@ -19,10 +19,12 @@ LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 
 
 def add_common_args(ap: argparse.ArgumentParser, *, default_http_port: int, app_name: str,
-                    version: Optional[str] = None, templates: bool = True) -> argparse.ArgumentParser:
-    """Add ``-c/--config``, ``--host`` (127.0.0.1), ``--http-port`` (hidden alias ``--port``), ``--no-browser``,
-    ``--version``, ``-v/--verbose`` and (``templates=True``) ``--templates-dir``. The product passes its own
-    default port (series port table in the README); ``app_name`` is the dist name (``sme-modbus-sim``)."""
+                    version: Optional[str] = None, templates: bool = True,
+                    open_browser: bool = True) -> argparse.ArgumentParser:
+    """Add ``-c/--config``, ``--host`` (127.0.0.1), ``--http-port`` (hidden alias ``--port``), ``--no-browser`` /
+    ``--browser``, ``--version``, ``-v/--verbose`` and (``templates=True``) ``--templates-dir``. The product passes
+    its own default port (series port table in the README); ``app_name`` is the dist name (``sme-modbus-sim``).
+    ``open_browser`` is the default of ``args.no_browser`` (inverted): ``False`` = only ``--browser`` opens it."""
     if version is not None:
         ap.add_argument("--version", action="version", version=f"{app_name} {version}")
     ap.add_argument("-c", "--config", help="YAML / JSON config file")
@@ -30,7 +32,12 @@ def add_common_args(ap: argparse.ArgumentParser, *, default_http_port: int, app_
     ap.add_argument("--http-port", dest="http_port", type=int, default=default_http_port,
                     help=f"web UI port (default {default_http_port})")
     ap.add_argument("--port", dest="http_port", type=int, default=argparse.SUPPRESS, help=argparse.SUPPRESS)
-    ap.add_argument("--no-browser", action="store_true", help="do not open the web UI in a browser")
+    grp = ap.add_mutually_exclusive_group()
+    grp.add_argument("--no-browser", dest="no_browser", action="store_true",
+                     help="do not open the web UI in a browser" + (" (default)" if not open_browser else ""))
+    grp.add_argument("--browser", dest="no_browser", action="store_false",
+                     help="open the web UI in a browser" + (" (default)" if open_browser else ""))
+    ap.set_defaults(no_browser=not open_browser)
     if templates:
         from .templates import env_var_for
 

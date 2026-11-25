@@ -39,7 +39,7 @@ class EngineProtocol(Protocol):
 
     config: Any
     config_text: str
-    config_path: Optional[Path]
+    config_path: Union[str, Path, None]
 
     async def start(self) -> None: ...
 
@@ -73,7 +73,8 @@ class BaseEngine(abc.ABC):
     * ``async _rollback(old_config, old_state, error)``: undo a failed ``_apply_diff`` (default: reinstall the
       old state).
     * ``_step(dt)``: advance the simulation by ``dt`` simulated seconds (default: nothing).
-    * ``_on_tick()``: called every tick, running or paused (e.g. scan for value changes).
+    * ``_on_tick()``: called every tick, running or paused (e.g. scan for value changes), and once more on
+      :meth:`wake`.
     * ``stats_snapshot() -> dict | None``: per-interface counters pushed as ``{"type": "stats"}`` every
       ``stats_interval`` seconds while someone is subscribed (``None`` = no stats).
     * ``snapshot() -> dict`` (required): the full state for ``GET /api/state`` and ``/ws``.
@@ -87,9 +88,12 @@ class BaseEngine(abc.ABC):
     stats_interval = 2.0  # seconds between {"type": "stats"} pushes
     max_time_scale = 3600.0
     default_tick_seconds = 1.0
+    #: Name of the logger behind ``self.logger`` (products set their own, e.g. ``"sme_modbus_sim.engine"``).
+    logger_name = "sme_sim_common.engine"
 
     def __init__(self, config: Any, *, config_text: Optional[str] = None,
                  config_path: Optional[Union[str, Path]] = None, base_dir: Optional[Union[str, Path]] = None):
+        self.logger = logging.getLogger(self.logger_name)
         self.config_path = Path(config_path) if config_path else None
         self.base_dir = Path(base_dir) if base_dir else (self.config_path.resolve().parent if self.config_path
                                                          else None)
@@ -100,6 +104,8 @@ class BaseEngine(abc.ABC):
         self._lock: Optional[asyncio.Lock] = None
         self._stopping = False
         self._stats_at = 0.0
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._wake: Optional[asyncio.Event] = None
         self.sim_time = 0.0
         self.state: Any = None
         sim = getattr(config, "simulation", None)
@@ -209,7 +215,8 @@ class BaseEngine(abc.ABC):
         self._seq += 1
         ev = {"seq": self._seq, "t": time.time(), "level": level, "message": message, **fields}
         self.events.append(ev)
-        (log.error if level == "error" else log.warning if level == "warning" else log.info)(message)
+        lg = self.logger
+        (lg.error if level == "error" else lg.warning if level == "warning" else lg.info)(message)
         self.publish({"type": "log", "event": ev})
         return ev
 
@@ -256,8 +263,28 @@ class BaseEngine(abc.ABC):
 
     async def start(self) -> None:
         self._lock = asyncio.Lock()
+        self._loop = asyncio.get_running_loop()
+        self._wake = asyncio.Event()
         self._stopping = False
         self._task = asyncio.create_task(self._run())
+
+    def wake(self) -> None:
+        """Run one extra ``_on_tick`` (scan for changes, push) as soon as possible, without advancing simulated
+        time or shifting the tick schedule. Several wakes before it runs coalesce into one. Thread-safe: may be
+        called from any thread (e.g. a protocol stack's callback); a no-op before :meth:`start` / after the loop
+        closed."""
+        loop, ev = self._loop, self._wake
+        if loop is None or ev is None or loop.is_closed():
+            return
+        try:
+            current = asyncio.get_running_loop()
+        except RuntimeError:
+            current = None
+        if current is loop:
+            ev.set()
+        else:
+            with contextlib.suppress(RuntimeError):  # loop closed in the meantime
+                loop.call_soon_threadsafe(ev.set)
 
     async def stop(self) -> None:
         self._stopping = True
@@ -267,15 +294,28 @@ class BaseEngine(abc.ABC):
                 await self._task
             self._task = None
 
+    async def _guarded(self, fn, what: str) -> None:
+        async with self._lock:
+            try:
+                fn()
+            except Exception as e:  # keep the loop alive; surface the error
+                self.log_event("error", f"{what} failed: {type(e).__name__}: {e}")
+
     async def _run(self) -> None:
         loop = asyncio.get_running_loop()
+        if self._wake is None:
+            self._wake = asyncio.Event()
+        wake = self._wake
         nxt = loop.time()
         while not self._stopping:
             if loop.time() >= nxt:
-                async with self._lock:
-                    try:
-                        self.tick()
-                    except Exception as e:  # keep the loop alive; surface the error
-                        self.log_event("error", f"tick failed: {type(e).__name__}: {e}")
+                wake.clear()  # the due tick covers a pending wake-up
+                await self._guarded(self.tick, "tick")
                 nxt = max(nxt + self.tick_seconds, loop.time())
-            await asyncio.sleep(max(0.0, nxt - loop.time()))
+            try:
+                await asyncio.wait_for(wake.wait(), max(0.0, nxt - loop.time()))
+            except asyncio.TimeoutError:
+                continue
+            wake.clear()
+            if loop.time() < nxt:  # woken between ticks: scan / push only, the schedule is unchanged
+                await self._guarded(self._on_tick, "wake")
