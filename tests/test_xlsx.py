@@ -145,3 +145,73 @@ def test_missing_openpyxl_message(monkeypatch):
         SCHEMA.blank_template()
     cfg, errors = X.import_xlsx(b"", schema=SCHEMA)
     assert cfg is None and "[xlsx]" in errors[0]
+
+
+# ---------------------------------------------------------------- dynamic columns / required_headers / skip_blank
+
+ST_SHEET = X.Sheet("StateTexts", [("ref", "ref"), ("text_1", "state 1")], kinds={"ref": "int"}, required=("ref",),
+                   open_columns=True)
+
+
+def _st_build(tables, base, errors, warnings):
+    return {r.values["ref"]: [r.values[f"text_{i}"] for i in range(1, 13) if f"text_{i}" in r.values]
+            for r in tables["StateTexts"]}
+
+
+def _st_rows(states):
+    return {"StateTexts": [{"ref": ref, **{f"text_{i}": t for i, t in enumerate(texts, 1)}}
+                           for ref, texts in states.items()]}
+
+
+def test_open_columns_export_keeps_dynamic_columns():
+    states = {1: [f"s{i}" for i in range(1, 13)], 2: ["off", "on"]}
+    schema = X.XlsxSchema([ST_SHEET], export_rows=_st_rows, build=_st_build)
+    assert schema.row("StateTexts", {"ref": 1, "text_3": "c", "text_2": "b", "obj": {"a": 1}}) == \
+        {"ref": 1, "text_3": "c", "text_2": "b"}  # known first, then in order; non-scalar dropped (no extra)
+    data, warnings = X.export_xlsx(states, schema=schema)
+    assert warnings == []
+    ws = load_workbook(io.BytesIO(data))["StateTexts"]
+    assert [c.value for c in ws[1]] == ["ref", *(f"text_{i}" for i in range(1, 13))]
+    cfg, msgs = X.import_xlsx(data, schema=schema)
+    assert msgs == [] and cfg == states
+
+
+def test_export_rows_may_return_extra_columns():
+    def rows(states):
+        return _st_rows(states), {"StateTexts": [("text_9", "state 9")]}
+
+    schema = X.XlsxSchema([ST_SHEET], export_rows=rows, build=_st_build)
+    data, _ = X.export_xlsx({1: ["a", "b", "c"]}, schema=schema)
+    ws = load_workbook(io.BytesIO(data))["StateTexts"]
+    assert [c.value for c in ws[1]] == ["ref", "text_1", "text_9", "text_2", "text_3"]
+    assert ws.cell(2, 3).value == "state 9" and [c.value for c in ws[3]] == [1, "a", None, "b", "c"]
+    # a sheet without open_columns only gets the given columns
+    closed = X.Sheet("StateTexts", ST_SHEET.columns, kinds=ST_SHEET.kinds)
+    assert X.XlsxSchema([closed]).extra_columns({"StateTexts": [{"text_5": "x"}]}) == {}
+
+
+NET = X.Sheet("Network", [("key", "key"), ("value", "value")], kinds={"value": "value"}, required=("key",),
+              required_headers=("value",), skip_blank=("value",))
+
+
+def _net_build(tables, base, errors, warnings):
+    return {r.values["key"]: r.values["value"] for r in tables["Network"]}
+
+
+def test_skip_blank_and_required_headers():
+    schema = X.XlsxSchema([NET], build=_net_build)
+    data, _ = schema.write({"Network": [{"key": "network.ip", "value": "10.0.0.5"},
+                                        {"key": "simulation.time_scale"}]})
+    cfg, msgs = schema.import_xlsx(data)
+    assert msgs == [] and cfg == {"network.ip": "10.0.0.5"}  # blank value row skipped, no error
+    # header-only requirement: empty cells are fine when the column is not in skip_blank
+    loose = X.XlsxSchema([X.Sheet("Network", NET.columns, required_headers=("value",))],
+                         build=lambda t, b, e, w: {r.values["key"]: r.values.get("value") for r in t["Network"]})
+    assert loose.import_xlsx(data) == ({"network.ip": "10.0.0.5", "simulation.time_scale": None}, [])
+    # missing value header is an error
+    wb = load_workbook(io.BytesIO(data))
+    wb["Network"].delete_cols(2)
+    buf = io.BytesIO()
+    wb.save(buf)
+    cfg, errors = schema.import_xlsx(buf.getvalue())
+    assert cfg is None and errors == ["Network row 1: missing column(s) value"]

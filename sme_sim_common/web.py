@@ -110,11 +110,23 @@ def _key_type(item_model, attr: str) -> type:
     return str
 
 
-async def _call(fn, *args):
+def _accepts_kw(fn, name: str) -> bool:
+    """Whether ``fn`` takes the keyword argument ``name`` (by name or through ``**kwargs``)."""
+    import inspect
+
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):  # builtins / C callables without a signature
+        return False
+    return any(p.kind is p.VAR_KEYWORD or (p.name == name and p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY))
+               for p in params)
+
+
+async def _call(fn, *args, **kwargs):
     """Call a product hook; sync or async."""
     import inspect
 
-    res = fn(*args)
+    res = fn(*args, **kwargs)
     if inspect.isawaitable(res):
         res = await res
     return res
@@ -152,7 +164,10 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
       completes a new device before validation (e.g. a free key). ``duplicate_hook(engine, dev: dict, new_key,
       body: dict) -> dict`` adjusts the copy (e.g. a free Modbus unit id) and may change its key; it runs before
       the "key already exists" check. Without a hook the copy's key is ``body["name"]`` (or ``body[device_key]``)
-      or, for ``str`` keys, ``{key}_copy`` / ``{key}_copy2`` ..., for ``int`` keys the largest key + 1.
+      or, for ``str`` keys, ``{key}_copy`` / ``{key}_copy2`` ..., for ``int`` keys the largest key + 1. A hook that
+      accepts a ``src_key`` keyword (or ``**kwargs``) also gets the source device's key: ``duplicate_hook(engine,
+      dev, new_key, body, *, src_key)``; ``dev`` is a fresh copy (the source's dump with the new key), the source
+      device itself is never passed. Unknown devices are 404 ``unknown device <key>`` (``int`` keys unquoted).
       Responses carry the key as ``name``.
     * ``simulation`` (engine has ``set_running``): ``POST /api/simulation`` ``{"running", "time_scale"}``.
       ``simulation_hook(engine, rest: dict) -> dict | None`` (sync or async) receives the other fields after
@@ -364,7 +379,7 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
         for i, d in enumerate(device_items()):
             if match(device_key_of(d)):
                 return i, d
-        raise bad(404, f"unknown device {name!r}")
+        raise bad(404, f"unknown device {name!r}" if ktype is str else f"unknown device {key!r}")
 
     def dump_item(d) -> dict:
         return d.model_dump(mode="json", exclude_unset=True, exclude_none=True)
@@ -423,9 +438,9 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
             except (TypeError, ValueError):
                 raise bad(400, f"{device_key}: {value!r} is not a valid {ktype.__name__}") from None
 
-        async def run_hook(fn, *args):
+        async def run_hook(fn, *args, **kwargs):
             try:
-                return await _call(fn, *args)
+                return await _call(fn, *args, **kwargs)
             except (TypeError, ValueError, KeyError) as e:
                 raise bad(400, e) from None
 
@@ -475,7 +490,8 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
                 name = max((k for k in keys if isinstance(k, ktype)), default=0) + 1
             dev = {**dump_item(src), device_key: name}
             if duplicate_hook is not None:
-                res = await run_hook(duplicate_hook, engine, dev, name, body)
+                kw = {"src_key": device_key_of(src)} if _accepts_kw(duplicate_hook, "src_key") else {}
+                res = await run_hook(duplicate_hook, engine, dev, name, body, **kw)
                 if res is not None:
                     dev = res
             if not isinstance(dev, dict):

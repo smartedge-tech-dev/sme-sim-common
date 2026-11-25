@@ -120,6 +120,15 @@ def test_no_reserved_i18n_keys():
 - `engine.wake()`：立即执行一轮 `_on_tick`（扫描、推送），不推进模拟时间、不打乱 tick 节奏；线程安全
   （`stack.on_write = lambda *a: engine.wake()`）。
 - `BaseEngine` 子类的 `logger_name = "sme_my_sim.engine"`：作为 `self.logger` 的名字，引擎内部日志全部走它。
+- 接受 `src_key` 关键字（或 `**kwargs`）的 `duplicate_hook` 还会拿到源设备的 key
+  （例「源 key + 1 起第一个空闲」：`def dup(engine, dev, new_key, body, *, src_key)`）。不接受的 hook 照旧调用；
+  `dev` 是新拷贝（源设备 dump + 新 key），源设备本身不会传入。
+- 未知设备的 404 显示转换后的 key：`unknown device 1008`（`int` key 不带引号）。
+- `Sheet(..., open_columns=True)`：导出时没有对应列的标量字段按出现顺序作为动态列排在已知列之后，
+  `text_1`〜`text_12` 往返不丢；`export_rows` 也可以返回 `(rows, {sheet: [(header, help), ...]})` 显式指定额外列
+  （显式的排在前面）。
+- `Sheet(..., required_headers=("value",))`：只要求表头有该列，单元格可空（`required` 仍是「存在且非空」）；
+  `skip_blank=("value",)`：`value` 为空的行直接跳过、不报错（适用于 `Network` 这类 key / value 表）。
 
 ### 迁移注意事项
 

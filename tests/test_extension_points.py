@@ -274,3 +274,40 @@ def test_wake_runs_on_tick_without_advancing_time():
         e.wake()  # after stop: harmless
 
     asyncio.run(main())
+
+
+# ---------------------------------------------------------------- duplicate_hook src_key / 404 text
+
+def test_duplicate_hook_gets_src_key():
+    calls = []
+
+    def hook(engine, dev, new_key, body, *, src_key):  # first free key after the source
+        calls.append((src_key, new_key, dict(dev)))
+        used, n = {d.device_id for d in engine.config.devices}, src_key + 1
+        while n in used:
+            n += 1
+        return {**dev, "device_id": n}
+
+    eng, c = int_client(duplicate_hook=hook)
+    with c:
+        for k in (100, 8):
+            c.post("/api/devices", json={"device_id": k, "name": f"d{k}"})
+        assert c.post("/api/devices/7/duplicate").json()["name"] == 9  # not 101 (largest + 1)
+        assert calls == [(7, 101, {"device_id": 101, "name": "a"})]  # dev = copy with the default key
+        assert [(d.device_id, d.name) for d in eng.config.devices][0] == (7, "a")  # source unchanged
+
+    seen = []
+    eng, c = int_client(duplicate_hook=lambda e, d, k, b, **kw: seen.append(kw) or d)
+    with c:
+        assert c.post("/api/devices/7/duplicate").json()["name"] == 8 and seen == [{"src_key": 7}]
+
+
+def test_unknown_device_404_text():
+    eng, c = int_client()
+    with c:
+        r = c.get("/api/devices/1008/config")
+        assert r.status_code == 404 and "unknown device 1008" in r.text and "'1008'" not in r.text
+        assert "unknown device 'abc'" in c.get("/api/devices/abc/config").text  # not convertible: as typed
+    eng = Engine(parse_text(YAML, Config))
+    with TestClient(make_base_app(eng, key_type=str, manage_engine=False)) as c:
+        assert "unknown device 'nope'" in c.delete("/api/devices/nope").text

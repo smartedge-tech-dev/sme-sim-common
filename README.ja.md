@@ -120,6 +120,16 @@ def test_no_reserved_i18n_keys():
 - `engine.wake()`：模擬時間を進めず、tick のリズムも崩さずに `_on_tick`（スキャン・プッシュ）を 1 回すぐ実行します。
   スレッドセーフです（`stack.on_write = lambda *a: engine.wake()`）。
 - `BaseEngine` サブクラスの `logger_name = "sme_my_sim.engine"`：`self.logger` の名前になり、エンジン内部のログはすべてこれを使います。
+- `src_key` キーワード（または `**kwargs`）を受け取る `duplicate_hook` には複製元のキーも渡されます
+  （例「複製元 + 1 以降の最初の空き」：`def dup(engine, dev, new_key, body, *, src_key)`）。受け取らないフックは
+  従来どおり呼ばれます。`dev` は新しいコピー（複製元のダンプ + 新キー）で、複製元そのものは渡されません。
+- 存在しないデバイスの 404 は変換後のキーを表示します：`unknown device 1008`（`int` キーは引用符なし）。
+- `Sheet(..., open_columns=True)`：エクスポート時、列のないスカラー項目を既知列の後ろに出現順で動的列として出力し、
+  `text_1`〜`text_12` が往復で欠けません。`export_rows` は `(rows, {sheet: [(header, help), ...]})` を返して
+  追加列を明示することもできます（明示分が先）。
+- `Sheet(..., required_headers=("value",))`：列の存在のみ必須でセルは空でも可（`required` は従来どおり
+  「存在かつ非空」）。`skip_blank=("value",)`：`value` が空の行はエラーにせず読み飛ばします（`Network` のような
+  key / value シート向け）。
 
 ### 移行時の注意
 

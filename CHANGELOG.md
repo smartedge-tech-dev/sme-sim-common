@@ -34,6 +34,12 @@ First release. The API below is the 1.x compatibility promise.
   `BaseEngine.logger_name` / `self.logger` for all engine logging, `EngineProtocol.config_path` typed
   `Union[str, Path, None]`.
 - `cli`: `add_common_args(..., open_browser=True)` and `--browser` next to `--no-browser`.
+- `web`: `duplicate_hook` gets the source device's key as `src_key` when it accepts that keyword (or `**kwargs`);
+  404 `unknown device <key>` shows the converted key (`int` keys unquoted).
+- `xlsx`: `open_columns` sheets export the scalar fields without a column as dynamic columns (`XlsxSchema.row`,
+  collected by `XlsxSchema.extra_columns`); `export_rows` may return `(rows, extra_columns)`;
+  `Sheet.required_headers` (header must exist, cells may be empty) and `Sheet.skip_blank` (rows with an empty
+  cell in these columns are skipped silently).
 - `common.js`: `common.config.export_xlsx` (en / ja / zh).
 - `behaviors`: behavior definitions and compilation.
 - `templates`: `TemplateRegistry` (built-in and user device templates, `--templates-dir`).

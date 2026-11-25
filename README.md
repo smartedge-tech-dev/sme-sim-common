@@ -126,6 +126,16 @@ All optional; products pass them instead of re-implementing the standard routes.
 - `engine.wake()`: run one `_on_tick` (scan / push) now, without advancing simulated time or shifting the tick
   schedule; thread-safe: `stack.on_write = lambda *a: engine.wake()`.
 - `logger_name = "sme_my_sim.engine"` on a `BaseEngine` subclass names `self.logger`, used for all engine logging.
+- `duplicate_hook` with a `src_key` keyword (or `**kwargs`) also gets the source device's key, e.g. "first free
+  key after the source": `def dup(engine, dev, new_key, body, *, src_key)`. Hooks without it are called as before;
+  `dev` is a fresh copy (source dump + new key), the source device is never passed.
+- 404 for an unknown device shows the converted key: `unknown device 1008` (`int` keys unquoted).
+- `Sheet(..., open_columns=True)`: on export the scalar fields without a column become dynamic columns (after the
+  known ones, in order), so `text_1` ... `text_12` round-trip; `export_rows` may also return
+  `(rows, {sheet: [(header, help), ...]})` to name extra columns explicitly (they come first).
+- `Sheet(..., required_headers=("value",))`: the column must exist but cells may be empty (`required` keeps
+  "present and non-empty"); `skip_blank=("value",)` silently skips rows whose `value` is empty (key / value
+  sheets such as `Network`).
 
 ### Migration notes
 

@@ -160,7 +160,13 @@ class Sheet:
     converter (kind name or callable, default ``str``); ``required`` columns must be present in the header row
     and non-empty in every data row. A sheet with an ``extra`` column round-trips fields without a column as a
     YAML flow mapping. ``optional`` sheets may be missing from an imported workbook. ``open_columns`` accepts
-    unknown headers (dynamic columns such as ``text_N``) instead of warning about them."""
+    unknown headers (dynamic columns such as ``text_N``) instead of warning about them and, on export, keeps the
+    scalar fields without a column as dynamic columns after the known ones (see :meth:`XlsxSchema.row`).
+
+    ``required_headers`` columns must be present in the header row but may be empty in data rows (``required``
+    implies it). A data row with an empty cell in any ``skip_blank`` column is skipped silently: it is not
+    converted, not checked and not returned (e.g. a ``key`` / ``value`` sheet whose rows without a ``value``
+    keep the running setting)."""
 
     title: str
     columns: Sequence[Tuple[str, str]]
@@ -168,6 +174,8 @@ class Sheet:
     required: Tuple[str, ...] = ()
     optional: bool = False
     open_columns: bool = False
+    required_headers: Tuple[str, ...] = ()
+    skip_blank: Tuple[str, ...] = ()
 
     @property
     def headers(self) -> List[str]:
@@ -197,15 +205,19 @@ class SheetRow:
         return {**(v.pop(EXTRA, None) or {}), **v}
 
 
-ExportRows = Callable[[Any], Mapping[str, List[Dict[str, Any]]]]
+#: ``cfg -> {sheet: [dict, ...]}`` or ``cfg -> ({sheet: [dict, ...]}, {sheet: [(header, help), ...]})``
+ExportRows = Callable[[Any], Union[Mapping[str, List[Dict[str, Any]]],
+                                   Tuple[Mapping[str, List[Dict[str, Any]]],
+                                         Mapping[str, Sequence[Tuple[str, str]]]]]]
 Build = Callable[[Dict[str, List[SheetRow]], Any, List[str], List[str]], Any]
 
 
 class XlsxSchema:
     """A product's workbook: its sheets plus the two config <-> rows hooks.
 
-    ``export_rows(cfg)`` returns ``{sheet title: [model dump dict, ...]}``; :meth:`row` moves the fields that
-    have a column into cells and the rest into ``extra``. ``build(tables, base, errors, warnings)`` turns
+    ``export_rows(cfg)`` returns ``{sheet title: [model dump dict, ...]}``, or ``(rows, extra_columns)`` with
+    ``{sheet title: [(header, help), ...]}`` dynamic columns; :meth:`row` moves the fields that have a column into
+    cells and the rest into ``extra``. Dynamic columns of ``open_columns`` sheets are also collected from the rows. ``build(tables, base, errors, warnings)`` turns
     ``{sheet title: [SheetRow, ...]}`` into a config (model instance, or a dict validated with ``model``); it
     appends row-level messages to ``errors`` / ``warnings`` and may raise ``ValidationError`` / ``ValueError``.
     """
@@ -257,7 +269,9 @@ class XlsxSchema:
 
     def row(self, title: str, d: Dict[str, Any]) -> Dict[str, Any]:
         """Pop the fields that have a column out of a model dump; what is left goes to ``extra`` (if the sheet
-        has one; otherwise it is dropped). ``yaml`` columns are written as flow text, ``list`` as a comma list."""
+        has one; otherwise it is dropped). ``yaml`` columns are written as flow text, ``list`` as a comma list.
+        On an ``open_columns`` sheet the remaining scalar fields are kept as dynamic columns, in their order,
+        after the known columns (only non-scalar leftovers go to ``extra``)."""
         sheet, d, row = self.sheets[title], dict(d), {}
         for col in sheet.headers:
             if col == EXTRA or col not in d:
@@ -274,6 +288,9 @@ class XlsxSchema:
             else:
                 continue
             d.pop(col)
+        if sheet.open_columns:
+            for k in [k for k, v in d.items() if k not in sheet.headers and _scalar(v)]:
+                row[k] = d.pop(k)
         if d and EXTRA in sheet.headers:
             row[EXTRA] = flow(d)
         return row
@@ -302,8 +319,32 @@ class XlsxSchema:
     def export_xlsx(self, cfg: Any) -> Tuple[bytes, List[str]]:
         if self.export_rows is None:
             raise ValueError("this workbook schema has no export_rows hook")
-        rows = {t: [self.row(t, d) for d in ds] for t, ds in self.export_rows(cfg).items()}
-        return self.write(rows)
+        res = self.export_rows(cfg)
+        given: Mapping[str, Sequence[Tuple[str, str]]] = {}
+        if isinstance(res, tuple):
+            res, given = res[0], res[1] or {}
+        rows = {t: [self.row(t, d) for d in ds] for t, ds in res.items()}
+        return self.write(rows, self.extra_columns(rows, given))
+
+    def extra_columns(self, rows: Mapping[str, List[Dict[str, Any]]],
+                      given: Optional[Mapping[str, Sequence[Tuple[str, str]]]] = None
+                      ) -> Dict[str, List[Tuple[str, str]]]:
+        """Dynamic columns per sheet for :meth:`write`: the ``given`` ``(header, help)`` pairs first, then, on
+        ``open_columns`` sheets, every cell key of ``rows`` that is neither a known header nor given, in order of
+        first appearance (empty help)."""
+        out: Dict[str, List[Tuple[str, str]]] = {}
+        for title, sheet in self.sheets.items():
+            cols = [(h, d) for h, d in (given or {}).get(title, ())]
+            if sheet.open_columns:
+                seen = {*sheet.headers, *(h for h, _ in cols)}
+                for r in rows.get(title, ()):
+                    for k in r:
+                        if k not in seen:
+                            seen.add(k)
+                            cols.append((k, ""))
+            if cols:
+                out[title] = cols
+        return out
 
     # ------------------------------------------------------------ reading
 
@@ -330,12 +371,15 @@ class XlsxSchema:
                         warnings.append(f"{sheet.title}: unknown column {v!r} ignored")
                         continue
                     header[i] = name
-                missing = [c for c in sheet.required if c not in header.values()]
+                missing = [c for c in dict.fromkeys((*sheet.required, *sheet.required_headers))
+                           if c not in header.values()]
                 if missing:
                     errors.append(f"{sheet.title} row {row_no}: missing column(s) {', '.join(missing)}")
                     return []
                 continue
             raw = {name: values[i] for i, name in header.items() if i < len(values) and not _blank(values[i])}
+            if any(c not in raw for c in sheet.skip_blank):
+                continue
             n = len(errors)
             conv: Dict[str, Any] = {}
             for col, v in raw.items():
