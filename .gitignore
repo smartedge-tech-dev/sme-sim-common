@@ -1,2 +1,11 @@
 # Design notes and task logs are kept local only
 ai/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.egg-info/
+.pytest_cache/

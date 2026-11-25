@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sme-sim-common"
+dynamic = ["version"]
+description = "Shared web shell, brand, i18n and Python helpers for the smart-edge simulator family"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+]
+dependencies = [
+  "starlette",
+  "uvicorn[standard]",
+  "pydantic>=2",
+  "pyyaml>=6",
+  "python-multipart",
+]
+
+[project.optional-dependencies]
+xlsx = ["openpyxl>=3.1"]
+dev = ["pytest", "httpx", "openpyxl>=3.1", "pyinstaller"]
+
+[project.urls]
+Homepage = "https://github.com/smartedge-tech-dev/sme-sim-common"
+
+[project.entry-points.pytest11]
+sme_sim_common = "sme_sim_common.testing.plugin"
+
+[project.entry-points.pyinstaller40]
+hook-dirs = "sme_sim_common.__pyinstaller:get_hook_dirs"
+
+[tool.setuptools.dynamic]
+version = { attr = "sme_sim_common.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["sme_sim_common*"]
+
+[tool.setuptools.package-data]
+sme_sim_common = ["static/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
