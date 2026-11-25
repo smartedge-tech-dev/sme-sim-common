@@ -205,10 +205,11 @@ class SheetRow:
         return {**(v.pop(EXTRA, None) or {}), **v}
 
 
-#: ``cfg -> {sheet: [dict, ...]}`` or ``cfg -> ({sheet: [dict, ...]}, {sheet: [(header, help), ...]})``
-ExportRows = Callable[[Any], Union[Mapping[str, List[Dict[str, Any]]],
-                                   Tuple[Mapping[str, List[Dict[str, Any]]],
-                                         Mapping[str, Sequence[Tuple[str, str]]]]]]
+_Rows = Mapping[str, List[Dict[str, Any]]]
+_Cols = Optional[Mapping[str, Sequence[Tuple[str, str]]]]
+#: ``cfg -> {sheet: [dict, ...]}``, ``cfg -> (rows, {sheet: [(header, help), ...]})`` or
+#: ``cfg -> (rows, extra_columns, [warning, ...])``
+ExportRows = Callable[[Any], Union[_Rows, Tuple[_Rows, _Cols], Tuple[_Rows, _Cols, Sequence[str]]]]
 Build = Callable[[Dict[str, List[SheetRow]], Any, List[str], List[str]], Any]
 
 
@@ -216,8 +217,10 @@ class XlsxSchema:
     """A product's workbook: its sheets plus the two config <-> rows hooks.
 
     ``export_rows(cfg)`` returns ``{sheet title: [model dump dict, ...]}``, or ``(rows, extra_columns)`` with
-    ``{sheet title: [(header, help), ...]}`` dynamic columns; :meth:`row` moves the fields that have a column into
-    cells and the rest into ``extra``. Dynamic columns of ``open_columns`` sheets are also collected from the rows. ``build(tables, base, errors, warnings)`` turns
+    ``{sheet title: [(header, help), ...]}`` dynamic columns (``None`` for none), or ``(rows, extra_columns,
+    warnings)`` with the product's own export warnings, which are reported before the shared ones (e.g. the
+    Excel cell limit); :meth:`row` moves the fields that have a column into cells and the rest into ``extra``.
+    Dynamic columns of ``open_columns`` sheets are also collected from the rows. ``build(tables, base, errors, warnings)`` turns
     ``{sheet title: [SheetRow, ...]}`` into a config (model instance, or a dict validated with ``model``); it
     appends row-level messages to ``errors`` / ``warnings`` and may raise ``ValidationError`` / ``ValueError``.
     """
@@ -317,14 +320,22 @@ class XlsxSchema:
         return self.save(wb), warnings
 
     def export_xlsx(self, cfg: Any) -> Tuple[bytes, List[str]]:
+        """``(bytes, warnings)``: the product's ``export_rows`` warnings first, then the shared ones."""
         if self.export_rows is None:
             raise ValueError("this workbook schema has no export_rows hook")
         res = self.export_rows(cfg)
         given: Mapping[str, Sequence[Tuple[str, str]]] = {}
+        own: List[str] = []
         if isinstance(res, tuple):
-            res, given = res[0], res[1] or {}
+            if len(res) not in (2, 3):
+                raise ValueError("export_rows must return rows, (rows, extra_columns) or "
+                                 "(rows, extra_columns, warnings)")
+            given = res[1] or {}
+            own = list(res[2] or ()) if len(res) == 3 else []
+            res = res[0]
         rows = {t: [self.row(t, d) for d in ds] for t, ds in res.items()}
-        return self.write(rows, self.extra_columns(rows, given))
+        data, warnings = self.write(rows, self.extra_columns(rows, given))
+        return data, own + warnings
 
     def extra_columns(self, rows: Mapping[str, List[Dict[str, Any]]],
                       given: Optional[Mapping[str, Sequence[Tuple[str, str]]]] = None

@@ -133,6 +133,8 @@ All optional; products pass them instead of re-implementing the standard routes.
 - `Sheet(..., open_columns=True)`: on export the scalar fields without a column become dynamic columns (after the
   known ones, in order), so `text_1` ... `text_12` round-trip; `export_rows` may also return
   `(rows, {sheet: [(header, help), ...]})` to name extra columns explicitly (they come first).
+- `export_rows` may return `(rows, extra_columns, warnings)` (`extra_columns` may be `None`): the product's own
+  export warnings (e.g. a dangling reference) come back from `export_xlsx` before the shared ones (cell limit).
 - `Sheet(..., required_headers=("value",))`: the column must exist but cells may be empty (`required` keeps
   "present and non-empty"); `skip_blank=("value",)` silently skips rows whose `value` is empty (key / value
   sheets such as `Network`).

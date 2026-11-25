@@ -127,6 +127,8 @@ def test_no_reserved_i18n_keys():
 - `Sheet(..., open_columns=True)`：导出时没有对应列的标量字段按出现顺序作为动态列排在已知列之后，
   `text_1`〜`text_12` 往返不丢；`export_rows` 也可以返回 `(rows, {sheet: [(header, help), ...]})` 显式指定额外列
   （显式的排在前面）。
+- `export_rows` 还可以返回 `(rows, extra_columns, warnings)`（`extra_columns` 可为 `None`）：产品自己的导出警告
+  （例如引用不存在）由 `export_xlsx` 返回，排在共通包警告（单元格长度上限等）之前。
 - `Sheet(..., required_headers=("value",))`：只要求表头有该列，单元格可空（`required` 仍是「存在且非空」）；
   `skip_blank=("value",)`：`value` 为空的行直接跳过、不报错（适用于 `Network` 这类 key / value 表）。
 

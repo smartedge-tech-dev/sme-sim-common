@@ -127,6 +127,8 @@ def test_no_reserved_i18n_keys():
 - `Sheet(..., open_columns=True)`：エクスポート時、列のないスカラー項目を既知列の後ろに出現順で動的列として出力し、
   `text_1`〜`text_12` が往復で欠けません。`export_rows` は `(rows, {sheet: [(header, help), ...]})` を返して
   追加列を明示することもできます（明示分が先）。
+- `export_rows` は `(rows, extra_columns, warnings)` も返せます（`extra_columns` は `None` 可）：製品独自の
+  エクスポート警告（参照先なし等）が `export_xlsx` から共通パッケージの警告（セル文字数上限等）より先に返ります。
 - `Sheet(..., required_headers=("value",))`：列の存在のみ必須でセルは空でも可（`required` は従来どおり
   「存在かつ非空」）。`skip_blank=("value",)`：`value` が空の行はエラーにせず読み飛ばします（`Network` のような
   key / value シート向け）。

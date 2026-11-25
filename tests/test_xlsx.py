@@ -190,6 +190,25 @@ def test_export_rows_may_return_extra_columns():
     assert X.XlsxSchema([closed]).extra_columns({"StateTexts": [{"text_5": "x"}]}) == {}
 
 
+def test_export_rows_may_return_warnings():
+    def rows(states):
+        return _st_rows(states), None, ["StateTexts: ref 9 not found"]
+
+    schema = X.XlsxSchema([ST_SHEET], export_rows=rows, build=_st_build)
+    data, warnings = X.export_xlsx({1: ["a", "x" * (X.CELL_LIMIT + 1)]}, schema=schema)
+    assert warnings[0] == "StateTexts: ref 9 not found"  # product warnings first
+    assert len(warnings) == 2 and "Excel cell limit" in warnings[1]
+    cfg, _ = X.import_xlsx(data, schema=schema)
+    assert cfg == {1: ["a"]}
+    # 3-tuple with extra columns and no warnings
+    schema3 = X.XlsxSchema([ST_SHEET], export_rows=lambda s: (_st_rows(s), {"StateTexts": [("text_9", "")]}, None),
+                           build=_st_build)
+    assert X.export_xlsx({1: ["a"]}, schema=schema3)[1] == []
+    bad = X.XlsxSchema([ST_SHEET], export_rows=lambda s: (_st_rows(s), None, [], 1), build=_st_build)
+    with pytest.raises(ValueError):
+        X.export_xlsx({1: ["a"]}, schema=bad)
+
+
 NET = X.Sheet("Network", [("key", "key"), ("value", "value")], kinds={"value": "value"}, required=("key",),
               required_headers=("value",), skip_blank=("value",))
 
