@@ -36,6 +36,22 @@ mount_product_static(app, STATIC_DIR)      # the product's own /static (skipped 
 The common files live under their own prefix `/sme-sim-common`, never under `/static`: Starlette matches
 mounts in registration order, so a nested path would be swallowed by the product's `/static` mount.
 
+### Minimal app
+
+```python
+import argparse
+from pathlib import Path
+
+from sme_sim_common.cli import add_common_args, run_web
+from sme_sim_common.web import make_base_app
+
+ap = add_common_args(argparse.ArgumentParser(), default_http_port=8080, app_name="sme-my-sim")
+args = ap.parse_args()
+engine = MyEngine(...)                     # follows sme_sim_common.engine.EngineProtocol (or subclass BaseEngine)
+app = make_base_app(engine, config_path=args.config, static_dir=Path(__file__).parent / "static")
+run_web(app, args)                         # uvicorn on args.host / args.http_port, opens the browser
+```
+
 ### Page skeleton
 
 Start from `templates/static/index.html`. The load order is fixed:

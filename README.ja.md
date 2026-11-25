@@ -35,6 +35,22 @@ mount_product_static(app, STATIC_DIR)      # 製品自身の /static（ディレ
 共通ファイルは独自のプレフィックス `/sme-sim-common` で配信し、`/static` の下には置きません。
 Starlette は登録順にマウントを照合するため、入れ子にすると製品の `/static` に吸い込まれます。
 
+### 最小のアプリ
+
+```python
+import argparse
+from pathlib import Path
+
+from sme_sim_common.cli import add_common_args, run_web
+from sme_sim_common.web import make_base_app
+
+ap = add_common_args(argparse.ArgumentParser(), default_http_port=8080, app_name="sme-my-sim")
+args = ap.parse_args()
+engine = MyEngine(...)                     # sme_sim_common.engine.EngineProtocol に従う（または BaseEngine を継承）
+app = make_base_app(engine, config_path=args.config, static_dir=Path(__file__).parent / "static")
+run_web(app, args)                         # uvicorn を args.host / args.http_port で起動し、ブラウザを開く
+```
+
 ### ページの骨格
 
 `templates/static/index.html` から始めます。読み込み順は固定です：

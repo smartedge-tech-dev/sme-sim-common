@@ -35,6 +35,22 @@ mount_product_static(app, STATIC_DIR)      # 产品自己的 /static（目录不
 共通文件使用独立前缀 `/sme-sim-common`，不放在 `/static` 下：Starlette 按注册顺序匹配挂载点，
 嵌套路径会被产品的 `/static` 吞掉。
 
+### 最小应用
+
+```python
+import argparse
+from pathlib import Path
+
+from sme_sim_common.cli import add_common_args, run_web
+from sme_sim_common.web import make_base_app
+
+ap = add_common_args(argparse.ArgumentParser(), default_http_port=8080, app_name="sme-my-sim")
+args = ap.parse_args()
+engine = MyEngine(...)                     # 遵循 sme_sim_common.engine.EngineProtocol（或继承 BaseEngine）
+app = make_base_app(engine, config_path=args.config, static_dir=Path(__file__).parent / "static")
+run_web(app, args)                         # 用 uvicorn 在 args.host / args.http_port 启动并打开浏览器
+```
+
 ### 页面骨架
 
 从 `templates/static/index.html` 开始。加载顺序固定：
