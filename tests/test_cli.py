@@ -65,3 +65,17 @@ def test_validate(tmp_path, capsys):
     assert cli.run_validate([str(good)], prog="x", load=load, build=boom) == 2
     assert "bad behavior" in capsys.readouterr().err
     assert cli.run_validate([str(tmp_path / "missing.yaml")], prog="x", load=load) == 2
+
+
+def test_validate_config_option(tmp_path, capsys):
+    good = tmp_path / "ok.yaml"
+    good.write_text("a: 1\n", encoding="utf-8")
+    load = lambda p: p.read_text(encoding="utf-8")  # noqa: E731
+    assert cli.run_validate(["-c", str(good)], prog="x", load=load) == 0
+    assert cli.run_validate(["--config", str(good)], prog="x", load=load) == 0
+    assert cli.run_validate([str(good), "-c", str(good)], prog="x", load=load) == 0
+    for argv in ([], [str(good), "-c", str(tmp_path / "other.yaml")]):
+        with pytest.raises(SystemExit) as e:
+            cli.run_validate(argv, prog="x", load=load)
+        assert e.value.code == 2
+    assert "conflicting config files" in capsys.readouterr().err

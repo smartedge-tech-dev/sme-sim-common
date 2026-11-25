@@ -74,8 +74,10 @@ def run_web(app: Any, args: argparse.Namespace, *, name: Optional[str] = None, d
 
 
 def add_validate_args(ap: argparse.ArgumentParser, *, templates: bool = True) -> argparse.ArgumentParser:
-    """Arguments of the ``validate CONFIG`` subcommand."""
-    ap.add_argument("config", help="YAML / JSON config file to check")
+    """Arguments of the ``validate CONFIG`` / ``validate -c CONFIG`` subcommand (``-c`` matches ``run``)."""
+    ap.add_argument("config", nargs="?", help="YAML / JSON config file to check")
+    ap.add_argument("-c", "--config", dest="config_opt", metavar="CONFIG",
+                    help="same as the positional CONFIG (the flag ``run`` uses)")
     if templates:
         ap.add_argument("--templates-dir", help="user template directory")
     return ap
@@ -90,6 +92,11 @@ def run_validate(argv: Sequence[str], *, prog: str, load: Callable[[Path], Any],
     ``before(args)`` runs first (e.g. load user templates from ``--templates-dir``)."""
     ap = add_validate_args(argparse.ArgumentParser(prog=f"{prog} validate", description="check a config file"))
     args = ap.parse_args(list(argv))
+    if args.config is None and args.config_opt is None:
+        ap.error("a config file is required (CONFIG or -c/--config CONFIG)")
+    if args.config is not None and args.config_opt is not None and args.config != args.config_opt:
+        ap.error(f"conflicting config files: {args.config!r} and -c {args.config_opt!r}")
+    args.config = args.config if args.config is not None else args.config_opt
     path = Path(args.config)
     try:
         if before is not None:

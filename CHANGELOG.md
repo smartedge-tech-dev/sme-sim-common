@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-25
+
+### Added
+- `cli.add_validate_args` / `run_validate`: `validate` also accepts `-c/--config CONFIG` (the flag `run` uses).
+  The positional `CONFIG` stays; giving neither, or both with different paths, is a usage error (exit 2).
+
+### Fixed
+- `behaviors.compile_expr` rejects a function used as a value (`pv > 3`, `max + 1`) and a value called as a
+  function (`t(1)`, `pi(2)`) at compile time. These expressions passed `validate` before but raised on every tick.
+
 ## [1.0.0] - 2026-11-25
 
 First release. The API below is the 1.x compatibility promise.

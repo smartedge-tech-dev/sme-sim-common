@@ -71,3 +71,21 @@ def test_check_point_names():
         check_point_names("D", ["p-v"], reserved={"p_v"}, kind="object")
     with pytest.raises(ValueError, match="rename the point"):
         check_point_names("D", ["sin"])
+
+
+@pytest.mark.parametrize("src, word", [
+    ("pv > 3", "'pv' is a function; call it as pv(device, point)"),
+    ("max + 1", "'max' is a function"),
+    ("clamp", "'clamp' is a function"),
+    ("t(1)", "'t' is a value, not a function"),
+    ("pi(2)", "'pi' is a value, not a function"),
+])
+def test_function_value_misuse_rejected(src, word):
+    with pytest.raises(ExpressionError, match=word.replace("(", r"\(").replace(")", r"\)")):
+        compile_expr(src)
+
+
+def test_function_value_proper_use_ok():
+    fn = compile_expr("max(t, 1) + pi * 0 + clamp(dt, 0, 1)")
+    assert fn({"t": 5, "dt": 2}) == 6
+    assert compile_expr("pv('d', 'p') + 1")({"pv": lambda d, p: 2}) == 3

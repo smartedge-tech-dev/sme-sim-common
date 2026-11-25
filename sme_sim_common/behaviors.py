@@ -80,6 +80,10 @@ def check_point_names(owner: str, names: Iterable[str], reserved: Optional[Itera
                          f"(reserved: {', '.join(sorted(reserved))}); rename the {kind}")
 
 
+_CALLABLE_NAMES = frozenset({n for n, f in FUNCTIONS.items() if callable(f)} | {"pv"})
+_VALUE_NAMES = frozenset({n for n, f in FUNCTIONS.items() if not callable(f)} | {"t", "dt", "hour"})
+
+
 def compile_expr(src: str) -> Callable[[Dict[str, Any]], Any]:
     """Compile a restricted expression; returns fn(names) -> value."""
     try:
@@ -93,6 +97,18 @@ def compile_expr(src: str) -> Callable[[Dict[str, Any]], Any]:
             raise ExpressionError(f"dunder names not allowed in {src!r}")
         if isinstance(node, ast.Call) and not isinstance(node.func, ast.Name):
             raise ExpressionError(f"only plain function calls allowed in {src!r}")
+    # A function used as a value (``pv > 3``) or a value called (``t(1)``) would only fail on every tick.
+    called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Name):
+            continue
+        if id(node) in called:
+            if node.id in _VALUE_NAMES:
+                raise ExpressionError(f"{node.id!r} is a value, not a function; use {node.id} without (...) "
+                                      f"in {src!r}")
+        elif node.id in _CALLABLE_NAMES:
+            hint = "pv(device, point)" if node.id == "pv" else f"{node.id}(...)"
+            raise ExpressionError(f"{node.id!r} is a function; call it as {hint} in {src!r}")
     code = compile(tree, "<expr>", "eval")
     env = {"__builtins__": {}, **FUNCTIONS}
 
