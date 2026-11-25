@@ -282,3 +282,61 @@ def test_device_as_template_round_trip(reg, tmp_path):
     assert all(p.order == "little" for p in saved)
     with pytest.raises(ValueError, match="invalid template name"):
         reg.device_as_template(dev, "a b")
+
+
+# ---------------------------------------------------------------- extra_keys
+
+
+class IdDev(Dev):
+    identification: Optional[Dict[str, Any]] = None
+
+
+def _id_registry() -> TemplateRegistry:
+    return TemplateRegistry(Pt, check, app_name="sme-test-sim", finalize_hook=allocate, export_hook=export,
+                            extra_keys=("identification",))
+
+
+def test_extra_keys_load_expand_merge_and_roundtrip(tmp_path):
+    reg = _id_registry()
+    (tmp_path / "meter.yaml").write_text("""
+name: scanned
+params: {vendor: ACME}
+identification: {vendor: "{vendor}", model: M1}
+points: [{name: p, table: input}]
+""", encoding="utf-8")
+    assert reg.load_user_templates(tmp_path) == []
+    assert reg.expand_extras("d", "scanned") == {"identification": {"vendor": "ACME", "model": "M1"}}
+    # dict + dict: shallow merge, device keys win
+    dev = IdDev(name="d", template="scanned", identification={"model": "M2", "rev": "B"})
+    assert reg.expand_device_extras(dev) == {"identification": {"vendor": "ACME", "model": "M2", "rev": "B"}}
+    # non-empty device scalar wins, empty device value does not
+    assert reg.expand_extras("d", "scanned", device_extras={"identification": "x"}) == {"identification": "x"}
+    assert reg.expand_extras("d", "scanned", device_extras={"identification": {}}) == {
+        "identification": {"vendor": "ACME", "model": "M1"}}
+    # no template: device value passes through; expand() itself is unchanged
+    assert reg.expand_device_extras(IdDev(name="d", identification={"vendor": "Z"})) == {
+        "identification": {"vendor": "Z"}}
+    assert reg.expand_device_extras(Dev(name="d")) == {}
+    assert [p.name for p in reg.expand_device(dev)] == ["p"]
+    # export round trip, literal braces escaped
+    src = IdDev(name="real", points=[Pt(name="q", table="input")],
+                identification={"vendor": "A{x}", "model": "M"})
+    text = reg.device_as_template(src, "saved")
+    assert yaml.safe_load(text)["identification"] == {"vendor": "A{{x}}", "model": "M"}
+    (tmp_path / "saved.yaml").write_text(text, encoding="utf-8")
+    assert reg.load_user_templates(tmp_path) == []
+    back = IdDev(name="copy", template="saved")
+    assert reg.expand_device_extras(back) == {"identification": {"vendor": "A{x}", "model": "M"}}
+    assert [p.name for p in reg.expand_device(back)] == ["q"]
+    # a device without those fields exports no extra key
+    assert "identification" not in yaml.safe_load(reg.device_as_template(Dev(name="n"), "plain"))
+
+
+def test_extra_keys_undeclared_key_is_an_error(reg, tmp_path):
+    (tmp_path / "a.yaml").write_text("identification: {vendor: A}\npoints: []\n", encoding="utf-8")
+    errs = reg.load_user_templates(tmp_path)  # fixture registry has no extra_keys
+    assert len(errs) == 1 and "unknown key(s) ['identification']" in errs[0]["error"]
+    reg2 = _id_registry()
+    (tmp_path / "a.yaml").write_text("other: 1\npoints: []\n", encoding="utf-8")
+    errs = reg2.load_user_templates(tmp_path)
+    assert len(errs) == 1 and "unknown key(s) ['other']" in errs[0]["error"]

@@ -113,6 +113,9 @@ def test_no_reserved_i18n_keys():
   `{key}_copy`（`str` key）或当前最大值 + 1（`int` key）。
 - `simulation_hook(engine, rest) -> dict | None`：接收 `POST /api/simulation` 中 `running` / `time_scale` 以外的字段，
   返回的 dict 合并进响应（`simulation_hook=lambda e, rest: e.apply_set_time(rest)`）。
+- `TemplateRegistry(..., extra_keys=("identification",))`：允许用户模板带额外的顶层 key；
+  `registry.expand_device_extras(dev)` 返回与设备自身字段合并后的值（设备的非空值优先，dict 做浅合并），
+  `device_as_template` 也会导出它们。
 - `import_hooks={".csv": import_ede, ".zip": import_ede, ".yaml": import_text}`（`POST /api/config/import`）：
   `hook(engine, files: dict[name, bytes]) -> (config | None, messages[, config_text])`；`.xlsx`（及其它扩展名）仍由
   `XlsxSchema` 处理。事件日志记录 warning 件数和前 5 条。

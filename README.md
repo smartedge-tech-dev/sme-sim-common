@@ -118,6 +118,9 @@ All optional; products pass them instead of re-implementing the standard routes.
   `{key}_copy` (`str` keys) or largest key + 1 (`int` keys).
 - `simulation_hook(engine, rest) -> dict | None` gets the `POST /api/simulation` fields other than `running` /
   `time_scale`; a dict result is merged into the response: `simulation_hook=lambda e, rest: e.apply_set_time(rest)`.
+- `TemplateRegistry(..., extra_keys=("identification",))` allows extra top-level keys in user templates;
+  `registry.expand_device_extras(dev)` returns them merged with the device's own fields (non-empty device value
+  wins, dicts merged shallowly) and `device_as_template` exports them.
 - `import_hooks={".csv": import_ede, ".zip": import_ede, ".yaml": import_text}` for `POST /api/config/import`:
   `hook(engine, files: dict[name, bytes]) -> (config | None, messages[, config_text])`; `.xlsx` (and any other
   extension) still goes to the `XlsxSchema`. The event log records the warning count and the first 5 warnings.

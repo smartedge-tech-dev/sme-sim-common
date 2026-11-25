@@ -34,6 +34,11 @@ overrides the built-in template of the same name. File format::
     params: {rated_kw: 10}       # defaults, overridable per device with ``params:``
     points: [...]                # key = ``items_attr``; same schema as a device's items
 
+``extra_keys=("identification", ...)`` (constructor) additionally allows those top-level keys in a user template
+(any value; ``{param}`` substitution applies). They are not items: ``expand_extras`` / ``expand_device_extras``
+return them merged with the device's own fields (a non-empty device value wins; two dicts are merged shallowly
+with the device's keys winning), and ``device_as_template`` writes the device's fields of those names back.
+
 Parameter substitution happens only inside string values: ``str.format`` with the merged params
 (``"clamp(p, 0, {rated_kw})"``). A string that is exactly one placeholder (``max: "{rated_kw}"``) takes the
 parameter value with its type. Literal braces are written ``{{`` / ``}}``.
@@ -44,7 +49,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Callable, Dict, Generic, Iterable, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, Dict, Generic, Iterable, List, Optional, Tuple, Type, TypeVar, Union
 
 import yaml
 from pydantic import BaseModel, ValidationError
@@ -111,13 +116,15 @@ class TemplateRegistry(Generic[Item]):
 
     def __init__(self, item_model: Type[Item], validate_hook: Optional[ValidateHook] = None, *,
                  app_name: str, items_attr: str = "points", finalize_hook: Optional[FinalizeHook] = None,
-                 export_hook: Optional[ExportHook] = None, env_var: Optional[str] = None):
+                 export_hook: Optional[ExportHook] = None, env_var: Optional[str] = None,
+                 extra_keys: Tuple[str, ...] = ()):
         self.item_model = item_model
         self.validate_hook = validate_hook
         self.finalize_hook = finalize_hook
         self.export_hook = export_hook
         self.app_name = app_name
         self.items_attr = items_attr
+        self.extra_keys = tuple(extra_keys)
         self.env_var = env_var or env_var_for(app_name)
         self.builtins: Dict[str, Dict[str, Any]] = {}
         self.user_templates: Dict[str, Dict[str, Any]] = {}
@@ -203,6 +210,32 @@ class TemplateRegistry(Generic[Item]):
         return self.expand(dev.name, getattr(dev, "template", None), getattr(dev, "params", None) or {},
                            getattr(dev, self.items_attr, None) or [], getattr(dev, "removed", None))
 
+    def expand_extras(self, owner: str, template: Optional[str] = None, params: Optional[Dict[str, Any]] = None,
+                      device_extras: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """``extra_keys`` values of the template merged with ``device_extras`` (the device's own fields).
+
+        A non-empty device value wins; if both sides are dicts they are merged shallowly (device keys win).
+        Only keys present on either side are returned."""
+        out: Dict[str, Any] = {}
+        if template:
+            t = self.get(template)
+            if t is None:
+                raise ValueError(f"{owner}: unknown template {template!r} (known: {', '.join(self.names())})")
+            p = {**t["params"], **(params or {})}
+            out = {k: substitute(v, p) for k, v in (t.get("extras") or {}).items()}
+        for k, dv in (device_extras or {}).items():
+            tv = out.get(k)
+            if isinstance(tv, dict) and isinstance(dv, dict):
+                out[k] = {**tv, **dv}
+            elif dv not in (None, "", {}, []) or k not in out:
+                out[k] = dv
+        return out
+
+    def expand_device_extras(self, dev: Any) -> Dict[str, Any]:
+        """``expand_extras`` for a device model: its ``extra_keys`` attributes are the device-side values."""
+        own = {k: getattr(dev, k) for k in self.extra_keys if getattr(dev, k, None) is not None}
+        return self.expand_extras(dev.name, getattr(dev, "template", None), getattr(dev, "params", None) or {}, own)
+
     # ------------------------------------------------------------ user-local templates
 
     def default_templates_dir(self) -> Path:
@@ -220,7 +253,7 @@ class TemplateRegistry(Generic[Item]):
 
     def _user_template(self, data: Any, path: Path) -> Dict[str, Any]:
         key = self.items_attr
-        allowed = {"name", "title", "description", "params", key}
+        allowed = {"name", "title", "description", "params", key, *self.extra_keys}
         if not isinstance(data, dict):
             raise ValueError(f"expected a mapping with name / title / params / {key}")
         unknown = sorted(set(data) - allowed)
@@ -248,8 +281,9 @@ class TemplateRegistry(Generic[Item]):
         if dup:
             raise ValueError(f"duplicate {key[:-1] if key.endswith('s') else key} names {dup}")
         self._finish(name, items)
+        extras = {k: data[k] for k in self.extra_keys if k in data}
         return {"name": name, "title": str(data.get("title") or name), "description": data.get("description"),
-                "params": params, "build": build, "source": "user", "path": str(path)}
+                "params": params, "build": build, "extras": extras, "source": "user", "path": str(path)}
 
     def clear_user_templates(self) -> None:
         """Forget all user templates (the directory is kept for a later reload)."""
@@ -291,4 +325,7 @@ class TemplateRegistry(Generic[Item]):
             out.append({k: (v if k == "name" else escape_braces(v)) for k, v in d.items()})
         doc = {"name": name, "title": title or name,
                "description": description or f"Saved from device {dev.name}", "params": {}, self.items_attr: out}
+        for k, v in self.expand_device_extras(dev).items():
+            if k in self.extra_keys and v not in (None, "", {}, []):
+                doc[k] = escape_braces(v.model_dump(mode="json", exclude_none=True) if isinstance(v, BaseModel) else v)
         return yaml.safe_dump(doc, allow_unicode=True, sort_keys=False)

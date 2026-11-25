@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "sme-sim-common"
 dynamic = ["version"]
 description = "Shared web shell, brand, i18n and Python helpers for the smart-edge simulator family"
+readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 classifiers = [

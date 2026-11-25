@@ -113,6 +113,9 @@ def test_no_reserved_i18n_keys():
   `{key}_copy`（`str` キー）または最大値 + 1（`int` キー）です。
 - `simulation_hook(engine, rest) -> dict | None`：`POST /api/simulation` の `running` / `time_scale` 以外の
   フィールドを受け取り、dict の戻り値はレスポンスにマージされます（`simulation_hook=lambda e, rest: e.apply_set_time(rest)`）。
+- `TemplateRegistry(..., extra_keys=("identification",))`：ユーザーテンプレートで追加のトップレベルキーを許可します。
+  `registry.expand_device_extras(dev)` はデバイス側のフィールドとマージした値を返し（デバイスの非空値が優先、dict は浅くマージ）、
+  `device_as_template` もそれを書き出します。
 - `import_hooks={".csv": import_ede, ".zip": import_ede, ".yaml": import_text}`（`POST /api/config/import`）：
   `hook(engine, files: dict[name, bytes]) -> (config | None, messages[, config_text])`。`.xlsx`（およびその他の拡張子）は
   従来どおり `XlsxSchema` が処理します。イベントログには警告件数と先頭 5 件が記録されます。

@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.0.0] - YYYY-MM-DD
+## [1.0.0] - 2026-11-25
 
 First release. The API below is the 1.x compatibility promise.
 
@@ -51,3 +51,6 @@ First release. The API below is the 1.x compatibility promise.
 - PyInstaller hook that collects the common static files and the uvicorn hidden imports.
 - `templates/`: CI, docs, release (Windows exe, PyPI trusted publishing, optional Docker), PyInstaller spec,
   mkdocs, pyproject, page / style / i18n skeletons, LICENSE, CHANGELOG, README and the adoption checklist.
+- `templates`: `TemplateRegistry(extra_keys=(...))` allows extra top-level keys in user templates (e.g. a scanned
+  `identification`); `expand_extras` / `expand_device_extras` merge them with the device's own fields (non-empty
+  device value wins, dicts merged shallowly) and `device_as_template` exports them.
