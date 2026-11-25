@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13"]
+        include:
+          - os: macos-latest
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+
+  # Builds a minimal app that only calls mount_common() into a onefile exe WITHOUT any hand-written
+  # hiddenimports / datas, then runs it. Proves that the PyInstaller hook shipped in the package
+  # (pyinstaller40 entry point) collects the shell static files and the uvicorn submodules.
+  pyinstaller-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      # Non-editable install: the frozen app must find the package (and its hook) the way a product build does.
+      - run: python -m pip install . fastapi pyinstaller
+      - run: pyinstaller tests/pyinstaller_smoke/smoke.spec --noconfirm --distpath build/smoke-dist --workpath build/smoke-work
+      - name: Run the frozen smoke app
+        shell: bash
+        run: ./build/smoke-dist/sme-sim-common-smoke.exe

@@ -1,0 +1,80 @@
+site_name: {{display_name}}
+site_url: https://smartedge-tech-dev.github.io/{{dist_name}}/
+site_description: {{description}}
+repo_url: https://github.com/smartedge-tech-dev/{{dist_name}}
+repo_name: smartedge-tech-dev/{{dist_name}}
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+  # Folder structure: docs/en/*.md, docs/ja/*.md, docs/zh/*.md (same file names in every folder).
+  - i18n:
+      docs_structure: folder
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+        - locale: ja
+          name: 日本語
+          build: true
+          nav_translations:
+            Getting started: はじめに
+            Configuration: 設定
+            Reference: リファレンス
+            About: 概要
+        - locale: zh
+          name: 简体中文
+          build: true
+          nav_translations:
+            Getting started: 快速入门
+            Configuration: 配置
+            Reference: 参考
+            About: 关于
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      base_path: [.]
+      check_paths: true
+
+# Product-specific: replace with the real pages.
+nav:
+  - index.md
+  - Getting started:
+      - quick-start.md
+  - Configuration:
+      - configuration.md
+  - Reference:
+      - http-api.md
+      - changelog.md
+  - About:
+      - license.md

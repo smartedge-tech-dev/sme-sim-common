@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{display_name}}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <!-- Load order (sme-sim-common design §5): common shell CSS, then the product CSS (accent override). -->
+  <link rel="stylesheet" href="/sme-sim-common/shell/shell.css?v=__SME_SIM_COMMON_VERSION__">
+  <link rel="stylesheet" href="/static/style.css">
+  <!-- Loaded in <head> so the stored theme applies before first paint.
+       __SME_SIM_COMMON_VERSION__ is replaced with the sme-sim-common version when GET / is served. -->
+  <script src="/sme-sim-common/shell/shell.js?v=__SME_SIM_COMMON_VERSION__"
+          data-storage="{{dist_name}}" data-common-version="__SME_SIM_COMMON_VERSION__"></script>
+</head>
+<body class="sh-tool">
+<!-- Shell.init() inserts the header before .sh-body and the footer after it. -->
+<div class="sh-body">
+  <main class="main">
+    <!-- Product UI goes here. -->
+  </main>
+</div>
+<!-- Vendor preset (Shell.vendors.smartEdge + vendor.* strings) and common.* strings, then product strings. -->
+<script src="/sme-sim-common/vendor/vendor.js?v=__SME_SIM_COMMON_VERSION__"></script>
+<script src="/sme-sim-common/i18n/common.js?v=__SME_SIM_COMMON_VERSION__"></script>
+<script src="/static/i18n/en.js"></script>
+<script src="/static/i18n/ja.js"></script>
+<script src="/static/i18n/zh.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

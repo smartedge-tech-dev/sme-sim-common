@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "{{dist_name}}"
+dynamic = ["version"]
+description = "{{display_name}}: {{description}}"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+keywords = ["simulator"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+  # Web shell, standard routes, config / engine / CLI helpers. 1.x only adds compatible features.
+  "sme-sim-common>=1.0,<2",
+  "fastapi>=0.110",
+  # Protocol libraries of this product go here.
+  # Add "sme-sim-common[xlsx]>=1.0,<2" instead of the line above if the product imports / exports .xlsx.
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx"]
+
+[project.urls]
+Homepage = "https://github.com/smartedge-tech-dev/{{dist_name}}"
+Documentation = "https://smartedge-tech-dev.github.io/{{dist_name}}/"
+Issues = "https://github.com/smartedge-tech-dev/{{dist_name}}/issues"
+
+[project.scripts]
+{{dist_name}} = "{{import_name}}.__main__:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "{{import_name}}.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["{{import_name}}*"]
+
+[tool.setuptools.package-data]
+{{import_name}} = ["static/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

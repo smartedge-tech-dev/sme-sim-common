@@ -1,0 +1,22 @@
+/* {{display_name}} app styles. Shell tokens (--ink, --muted, --line, --accent, --pale, --surface, ...)
+   come from /sme-sim-common/shell/shell.css, which is loaded before this file. */
+
+/* ---- Product accent (one accent per product; register it in the sme-sim-common README accent table).
+   The three blocks mirror the three token blocks of shell.css and must stay in sync with each other.
+   Override only --accent / --accent-ink / --accent-weak: the vendor area uses --vendor-accent
+   (fixed brand blue) and must not follow the product accent. */
+:root {
+  --accent: {{accent}}; --accent-ink: {{accent_ink}}; --accent-weak: {{accent_weak}};
+}
+/* KEEP IN SYNC with the prefers-color-scheme block below. */
+:root[data-theme="dark"] {
+  --accent: {{accent_dark}}; --accent-ink: {{accent_ink_dark}}; --accent-weak: {{accent_weak_dark}};
+}
+/* KEEP IN SYNC with :root[data-theme="dark"] above. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --accent: {{accent_dark}}; --accent-ink: {{accent_ink_dark}}; --accent-weak: {{accent_weak_dark}};
+  }
+}
+
+/* ---- Product layout below. */
