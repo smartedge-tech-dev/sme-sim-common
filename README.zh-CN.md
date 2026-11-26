@@ -176,6 +176,18 @@ def test_no_reserved_i18n_keys():
 | SME OCPPSim | `#b45309`（amber） | `#ffffff` | `#fef3c7` | `#fbbf24` / `#451a03` / `#78350f` |
 | SME SerialHub | 待定 | 待定 | 待定 | 待定 |
 
+## 什么该放进 common
+
+产品开发不等 common 发版。
+
+- **产品先行，common 后收。** 新 helper 先写在产品自己的模块里；等第二个产品也需要时再搬进 common，
+  第一个产品随后改用 common 版。
+- **加 hook，不加协议。** 产品需要的扩展点（hook、可选参数）可以加进 common；协议相关的行为（BACnet、
+  Modbus、OCPP 等）留在产品里。
+- **登记表只改文档。** 端口表、主色表加一行需要 PR，但不需要发版。
+- **改核心形状先讨论。** 如果产品需要的不是新 hook，而是改变 `make_base_app` 或 `BaseEngine` 的形状，
+  先开 issue 讨论，不要直接打补丁。
+
 ## 版本策略
 
 - 语义化版本，首发 `1.0.0`。1.x 内只做向后兼容的增补（新 key、新可选参数、新模块）与修复；

@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- README: "What belongs in common" (product first, promote later; hooks, not protocols).
+
 ## [1.2.0] - 2026-11-26
 
 ### Added

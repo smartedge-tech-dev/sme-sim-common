@@ -188,6 +188,19 @@ Default web UI ports, so that sibling products can run side by side. New product
 | SME OCPPSim | `#b45309` (amber) | `#ffffff` | `#fef3c7` | `#fbbf24` / `#451a03` / `#78350f` |
 | SME SerialHub | TBD | TBD | TBD | TBD |
 
+## What belongs in common
+
+Product work never waits for a common release.
+
+- **Product first, promote later.** A new helper starts in the product's own module. It moves into common
+  only when a second product needs it; the first product then switches to the common version.
+- **Hooks, not protocols.** Common may gain an extension point (a hook, an optional parameter) that a
+  product needs. Protocol-specific behavior (BACnet, Modbus, OCPP, ...) stays in the product.
+- **Registry changes are docs only.** Adding a row to the port or accent table needs a pull request but no
+  release.
+- **Core shape changes are a design discussion.** If a product needs a different shape of
+  `make_base_app` or `BaseEngine` rather than a new hook, open an issue first instead of patching it in.
+
 ## Versioning
 
 - Semantic Versioning, first release `1.0.0`. Within 1.x only backward-compatible additions (new keys,
