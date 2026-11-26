@@ -142,6 +142,16 @@ All optional; products pass them instead of re-implementing the standard routes.
   "present and non-empty"); `skip_blank=("value",)` silently skips rows whose `value` is empty (key / value
   sheets such as `Network`).
 
+### Config write-back
+
+Write the result of these with `atomic_write_text`; both keep the comments outside the part they change and
+fall back to rewriting more when the layout is unusual.
+
+- `replace_yaml_block(text, "network", value)` replaces one top-level block.
+- `replace_yaml_list_item(text, "chargers", "id", "0123", item)` replaces only the list item whose `id`
+  equals `"0123"` (compared as `str`), appends `item` when there is none, or deletes it with `item=None`;
+  the other items keep their lines and comments.
+
 ### Migration notes
 
 - `state` is an instance attribute of `BaseEngine` (the result of `_build`); a subclass must not define a

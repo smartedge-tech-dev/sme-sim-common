@@ -135,6 +135,14 @@ def test_no_reserved_i18n_keys():
 - `Sheet(..., required_headers=("value",))`：只要求表头有该列，单元格可空（`required` 仍是「存在且非空」）；
   `skip_blank=("value",)`：`value` 为空的行直接跳过、不报错（适用于 `Network` 这类 key / value 表）。
 
+### 配置写回
+
+结果用 `atomic_write_text` 写入。两者都保留未改动部分的注释，布局特殊时退回到更大范围的重写。
+
+- `replace_yaml_block(text, "network", value)`：替换一个顶层块。
+- `replace_yaml_list_item(text, "chargers", "id", "0123", item)`：只替换 `id` 等于 `"0123"`（按 `str`
+  比较）的列表项；没有则把 `item` 追加到末尾；`item=None` 时删除该项。其它项的行和注释原样保留。
+
 ### 迁移注意事项
 
 - `state` 是 `BaseEngine` 的实例属性（`_build` 的结果）；子类不能定义 `state()` 方法。

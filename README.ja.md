@@ -136,6 +136,16 @@ def test_no_reserved_i18n_keys():
   「存在かつ非空」）。`skip_blank=("value",)`：`value` が空の行はエラーにせず読み飛ばします（`Network` のような
   key / value シート向け）。
 
+### 設定の書き戻し
+
+結果は `atomic_write_text` で書き込みます。どちらも変更しない部分のコメントを保持し、レイアウトが特殊な場合は
+より広い範囲の書き直しに切り替わります。
+
+- `replace_yaml_block(text, "network", value)`：トップレベルのブロックを 1 つ置き換えます。
+- `replace_yaml_list_item(text, "chargers", "id", "0123", item)`：`id` が `"0123"`（`str` で比較）の
+  リスト項目だけを置き換え、該当がなければ `item` を末尾に追加し、`item=None` なら削除します。
+  他の項目の行とコメントはそのまま残ります。
+
 ### 移行時の注意
 
 - `state` は `BaseEngine` のインスタンス属性（`_build` の結果）です。サブクラスで `state()` メソッドを定義してはいけません。
