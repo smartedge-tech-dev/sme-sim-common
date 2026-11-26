@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-26
+
+### Added
+- `config.replace_yaml_list_item(text, key, match_field, match_value, new_item)`: comment-preserving write-back
+  of one item of a top-level YAML list. The item whose `match_field` equals `match_value` (compared as `str`)
+  is replaced, appended when missing, or deleted with `new_item=None`; the other items keep their lines and
+  comments. The result is read back and the whole block is rewritten when the layout is unusual (flow style,
+  empty list, ...).
+- README: SME OCPPSim registered in the port table (8082) and the accent table (amber).
+
 ## [1.1.0] - 2026-11-25
 
 ### Added

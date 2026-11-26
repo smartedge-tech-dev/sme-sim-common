@@ -2,7 +2,7 @@
 
 [English](README.md) | **日本語** | [简体中文](README.zh-CN.md)
 
-smart-edge のシミュレーターシリーズ（SME BACnetSim、SME ModbusSim、OCPP シミュレーター、SME SerialHub）の共通ランタイムです。
+smart-edge のシミュレーターシリーズ（SME BACnetSim、SME ModbusSim、SME OCPPSim、SME SerialHub）の共通ランタイムです。
 Web シェル（ヘッダー、メニュー、テーマ、言語、About）、ベンダー文言、`common.*` UI 文字列、プロトコルに依存しない Python 層
 （Web ヘルパー、設定 I/O、ビヘイビア、デバイステンプレート、テスト補助、PyInstaller フック）を提供します。
 `templates/` ディレクトリには、各製品が手作業でコピーするビルド時の雛形（CI、リリース、パッケージング、ドキュメント、ページ）を置いています。wheel には含まれません。
@@ -136,6 +136,16 @@ def test_no_reserved_i18n_keys():
   「存在かつ非空」）。`skip_blank=("value",)`：`value` が空の行はエラーにせず読み飛ばします（`Network` のような
   key / value シート向け）。
 
+### 設定の書き戻し
+
+結果は `atomic_write_text` で書き込みます。どちらも変更しない部分のコメントを保持し、レイアウトが特殊な場合は
+より広い範囲の書き直しに切り替わります。
+
+- `replace_yaml_block(text, "network", value)`：トップレベルのブロックを 1 つ置き換えます。
+- `replace_yaml_list_item(text, "chargers", "id", "0123", item)`：`id` が `"0123"`（`str` で比較）の
+  リスト項目だけを置き換え、該当がなければ `item` を末尾に追加し、`item=None` なら削除します。
+  他の項目の行とコメントはそのまま残ります。
+
 ### 移行時の注意
 
 - `state` は `BaseEngine` のインスタンス属性（`_build` の結果）です。サブクラスで `state()` メソッドを定義してはいけません。
@@ -158,7 +168,7 @@ def test_no_reserved_i18n_keys():
 |---|---|
 | SME BACnetSim | 8080 |
 | SME ModbusSim | 8081 |
-| OCPP シミュレーター | 未定 |
+| SME OCPPSim | 8082 |
 | SME SerialHub | 未定 |
 
 ## シリーズの主色表
@@ -167,7 +177,7 @@ def test_no_reserved_i18n_keys():
 |---|---|---|---|---|
 | SME BACnetSim | `#087def`（ブランドブルー、シェル既定） | `#fff` | `#e7f2fe` | シェル既定（`#3d9bff` / `#fff` / `#11304f`） |
 | SME ModbusSim | `#0f766e`（ティール） | `#ffffff` | `#ccfbf1` | `#2dd4bf` / `#042f2e` / `#134e4a` |
-| OCPP シミュレーター | 未定 | 未定 | 未定 | 未定 |
+| SME OCPPSim | `#b45309`（アンバー） | `#ffffff` | `#fef3c7` | `#fbbf24` / `#451a03` / `#78350f` |
 | SME SerialHub | 未定 | 未定 | 未定 | 未定 |
 
 ## バージョン方針
