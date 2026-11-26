@@ -2,7 +2,7 @@
 
 [English](README.md) | [日本語](README.ja.md) | **简体中文**
 
-smart-edge 模拟器系列（SME BACnetSim、SME ModbusSim、OCPP 模拟器、SME SerialHub）的共通运行时：
+smart-edge 模拟器系列（SME BACnetSim、SME ModbusSim、SME OCPPSim、SME SerialHub）的共通运行时：
 Web 外壳（页头、菜单、主题、语言、关于）、厂商文案、`common.*` UI 词条，以及与协议无关的 Python 层
 （Web 辅助、配置读写、行为、设备模板、测试辅助、PyInstaller hook）。
 `templates/` 目录存放各产品手工复制的构建期骨架（CI、发布、打包、文档、页面），不进入 wheel。
@@ -156,7 +156,7 @@ def test_no_reserved_i18n_keys():
 |---|---|
 | SME BACnetSim | 8080 |
 | SME ModbusSim | 8081 |
-| OCPP 模拟器 | 待定 |
+| SME OCPPSim | 8082 |
 | SME SerialHub | 待定 |
 
 ## 系列主色表
@@ -165,7 +165,7 @@ def test_no_reserved_i18n_keys():
 |---|---|---|---|---|
 | SME BACnetSim | `#087def`（品牌蓝，外壳默认） | `#fff` | `#e7f2fe` | 外壳默认（`#3d9bff` / `#fff` / `#11304f`） |
 | SME ModbusSim | `#0f766e`（teal） | `#ffffff` | `#ccfbf1` | `#2dd4bf` / `#042f2e` / `#134e4a` |
-| OCPP 模拟器 | 待定 | 待定 | 待定 | 待定 |
+| SME OCPPSim | `#b45309`（amber） | `#ffffff` | `#fef3c7` | `#fbbf24` / `#451a03` / `#78350f` |
 | SME SerialHub | 待定 | 待定 | 待定 | 待定 |
 
 ## 版本策略
