@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Planned as 1.3.0.
+## [1.3.0] - 2026-11-28
 
 ### Added
 - `sme_sim_common.mcp_server` (optional extra `sme-sim-common[mcp]`, official `mcp` SDK `>=2.3,<3`): an MCP
