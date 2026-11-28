@@ -26,6 +26,8 @@ from pydantic import BaseModel, ValidationError
 __all__ = [
     "XLSX_TYPE",
     "CELL_LIMIT",
+    "MAX_ROWS",
+    "FORMULA_PREFIXES",
     "XlsxUnavailable",
     "Sheet",
     "SheetRow",
@@ -40,6 +42,12 @@ __all__ = [
 
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 CELL_LIMIT = 32767  # Excel's maximum characters per cell
+#: Default cap on the rows read from one sheet on import (header, help and blank rows included). Reading stops
+#: at the cap, so a crafted workbook (e.g. a zip bomb declaring millions of rows) cannot exhaust memory.
+MAX_ROWS = 50_000
+#: Leading characters that make a text cell look like a formula (``=``) or a spreadsheet injection (``+ - @``,
+#: tab, carriage return). Exported text cells starting with one are written as literal text (quote prefix).
+FORMULA_PREFIXES = ("=", "+", "-", "@", "\uff20", "\t", "\r")
 EXTRA = "extra"  # name of the catch-all YAML column (fields without a column of their own)
 
 Converter = Callable[[Any], Any]
@@ -166,7 +174,9 @@ class Sheet:
     ``required_headers`` columns must be present in the header row but may be empty in data rows (``required``
     implies it). A data row with an empty cell in any ``skip_blank`` column is skipped silently: it is not
     converted, not checked and not returned (e.g. a ``key`` / ``value`` sheet whose rows without a ``value``
-    keep the running setting)."""
+    keep the running setting).
+
+    ``max_rows`` overrides the schema's per-sheet row cap (:attr:`XlsxSchema.max_rows`) for this sheet."""
 
     title: str
     columns: Sequence[Tuple[str, str]]
@@ -176,6 +186,7 @@ class Sheet:
     open_columns: bool = False
     required_headers: Tuple[str, ...] = ()
     skip_blank: Tuple[str, ...] = ()
+    max_rows: Optional[int] = None
 
     @property
     def headers(self) -> List[str]:
@@ -227,13 +238,16 @@ class XlsxSchema:
 
     def __init__(self, sheets: Sequence[Sheet], *, export_rows: Optional[ExportRows] = None,
                  build: Optional[Build] = None, model: Optional[type] = None,
-                 template_file: str = "template.xlsx", export_file: str = "export.xlsx"):
+                 template_file: str = "template.xlsx", export_file: str = "export.xlsx",
+                 max_rows: int = MAX_ROWS):
         self.sheets: Dict[str, Sheet] = {s.title: s for s in sheets}
         self.export_rows = export_rows
         self.build = build
         self.model = model
         self.template_file = template_file
         self.export_file = export_file
+        #: Rows read per sheet on import before giving up (see :data:`MAX_ROWS`; ``Sheet.max_rows`` overrides).
+        self.max_rows = max_rows
 
     # ------------------------------------------------------------ writing
 
@@ -301,7 +315,8 @@ class XlsxSchema:
     def write(self, rows: Mapping[str, List[Dict[str, Any]]],
               extra_columns: Optional[Mapping[str, Sequence[Tuple[str, str]]]] = None) -> Tuple[bytes, List[str]]:
         """Workbook bytes for ``{sheet: [cell dict, ...]}``. A text longer than the Excel cell limit is left out
-        with a warning."""
+        with a warning. A text starting with one of :data:`FORMULA_PREFIXES` is written as literal text (string
+        type, quote prefix): openpyxl would otherwise store ``=...`` as a formula."""
         wb = self.workbook(extra_columns)
         warnings: List[str] = []
         for title, sheet in self.sheets.items():
@@ -317,6 +332,11 @@ class XlsxSchema:
                         v = None
                     cells.append(v)
                 ws.append(cells)
+                for j, v in enumerate(cells, 1):
+                    if isinstance(v, str) and v.startswith(FORMULA_PREFIXES):
+                        cell = ws.cell(ws.max_row, j)
+                        cell.data_type = "s"
+                        cell.quotePrefix = True
         return self.save(wb), warnings
 
     def export_xlsx(self, cfg: Any) -> Tuple[bytes, List[str]]:
@@ -361,12 +381,18 @@ class XlsxSchema:
 
     def read_sheet(self, ws, errors: List[str], warnings: List[str], title: Optional[str] = None) -> List[SheetRow]:
         """Read a sheet as :class:`SheetRow` s (non-empty, non-comment rows). Conversion and required-column
-        errors are appended to ``errors`` (``"<sheet> row N, column 'x': reason"``) and mark the row not ok."""
+        errors are appended to ``errors`` (``"<sheet> row N, column 'x': reason"``) and mark the row not ok.
+        A sheet with more rows than its cap (``Sheet.max_rows``, else :attr:`max_rows`) is an error; reading
+        stops at the cap."""
         sheet = self.sheets[title or ws.title]
+        cap = sheet.max_rows if sheet.max_rows is not None else self.max_rows
         known = set(sheet.headers)
         header: Optional[Dict[int, str]] = None
         out: List[SheetRow] = []
         for row_no, values in enumerate(ws.iter_rows(values_only=True), 1):
+            if row_no > cap:
+                errors.append(f"{sheet.title}: more than {cap} rows (row limit), import refused")
+                return []
             if all(_blank(v) for v in values):
                 continue
             first = next((v for v in values if not _blank(v)), None)

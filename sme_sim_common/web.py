@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from starlette.exceptions import HTTPException
 from starlette.staticfiles import StaticFiles
 
-__all__ = ["COMMON_PREFIX", "STATIC_DIR", "VERSION_TOKEN", "FEATURES", "mount_common", "mount_product_static",
+__all__ = ["COMMON_PREFIX", "STATIC_DIR", "VERSION_TOKEN", "FEATURES", "MAX_IMPORT_BYTES", "mount_common", "mount_product_static",
            "bad", "error_response", "make_base_app"]
 
 #: URL prefix of the shared assets. Deliberately not nested under the product's ``/static`` (Starlette matches
@@ -29,6 +29,8 @@ VERSION_TOKEN = "__SME_SIM_COMMON_VERSION__"
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 #: Optional standard route groups of :func:`make_base_app`.
 FEATURES = ("xlsx", "templates", "devices", "simulation")
+#: Default cap on the request body of ``POST /api/config/import`` (all parts together), in bytes.
+MAX_IMPORT_BYTES = 10 * 1024 * 1024
 
 
 def mount_common(app, prefix: str = COMMON_PREFIX) -> None:
@@ -138,7 +140,8 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
                   config_model: Optional[type] = None, xlsx=None, templates=None,
                   devices_attr: str = "devices", device_key: str = "name", device_model: Optional[type] = None,
                   duplicate_hook=None, manage_engine: bool = True, key_type: Optional[type] = None,
-                  create_hook=None, simulation_hook=None, import_hooks: Optional[dict] = None):
+                  create_hook=None, simulation_hook=None, import_hooks: Optional[dict] = None,
+                  max_import_bytes: int = MAX_IMPORT_BYTES):
     """FastAPI app with the standard routes; the product adds its protocol routes through ``product_routers``
     (FastAPI ``APIRouter`` objects, Starlette ``Router`` objects, or plain route objects; matched before the mounts).
     Their routes are flattened into ``app.routes`` (FastAPI ``APIRoute`` objects, dependency injection intact).
@@ -153,7 +156,9 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
       (``".csv"``, ``".yaml"`` ...) to ``hook(engine, files: dict[filename, bytes]) -> (config | None, messages)``
       or ``(config, messages, config_text)`` (sync or async); the extension of the first ``file`` part picks the
       hook and every ``file`` part is passed. ``config`` ``None`` = ``messages`` are errors (400). Other files go
-      to ``xlsx``. ``POST /api/config/import`` exists when ``xlsx`` is on or ``import_hooks`` is given.
+      to ``xlsx``. ``POST /api/config/import`` exists when ``xlsx`` is on or ``import_hooks`` is given. A request
+      body larger than ``max_import_bytes`` (default :data:`MAX_IMPORT_BYTES`) is refused with 413 before it is
+      parsed.
     * ``templates`` (needs ``templates=TemplateRegistry``): ``GET /api/templates``, ``POST /api/templates/reload``,
       ``POST /api/templates/from-device/{device}``
     * ``devices`` (a device = one item of the config's top-level list ``devices_attr``, identified by
@@ -319,7 +324,20 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
 
     hooks = {(k if k.startswith(".") else f".{k}").lower(): v for k, v in (import_hooks or {}).items()}
     if on["xlsx"] or hooks:
+        async def capped_body(request: Request) -> None:
+            too_big = bad(413, f"the upload is larger than {max_import_bytes} bytes (import size limit)")
+            with contextlib.suppress(ValueError):
+                if int(request.headers.get("content-length", "")) > max_import_bytes:
+                    raise too_big
+            body = bytearray()
+            async for chunk in request.stream():
+                body += chunk
+                if len(body) > max_import_bytes:
+                    raise too_big
+            request._body = bytes(body)  # request.form() parses the cached body
+
         async def config_import(request: Request):
+            await capped_body(request)
             form = await request.form()
             files = [f for f in form.getlist("file") if isinstance(f, UploadFile)]
             if not files:

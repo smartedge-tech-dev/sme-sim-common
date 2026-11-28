@@ -234,3 +234,42 @@ def test_skip_blank_and_required_headers():
     wb.save(buf)
     cfg, errors = schema.import_xlsx(buf.getvalue())
     assert cfg is None and errors == ["Network row 1: missing column(s) value"]
+
+
+def test_formula_like_text_stays_literal():
+    texts = ["=1+1", "+1", "-x", "@SUM(A1)", "\uff20a", "\tx", "\rx", "plain"]
+    data, warnings = SCHEMA.write({"Devices": [{"name": t} for t in texts]})
+    assert warnings == []
+    ws = load_workbook(io.BytesIO(data))["Devices"]
+    cells = [ws.cell(i, 1) for i in range(3, 3 + len(texts))]
+    assert [c.value for c in cells] == [t.replace(chr(13), chr(10)) for t in texts]  # XML normalises CR
+    assert all(c.data_type == "s" for c in cells)
+    assert [c.quotePrefix for c in cells] == [True] * (len(texts) - 1) + [False]
+    computed = load_workbook(io.BytesIO(data), data_only=True)["Devices"]
+    assert computed["A3"].value == "=1+1"
+
+
+def test_formula_text_roundtrips_through_import():
+    cfg = parse_text(YAML, Config)
+    cfg.devices[0].description = "=1+1"
+    cfg.devices[0].points[0].name = "=1+1"
+    data, _ = X.export_xlsx(cfg, schema=SCHEMA)
+    back, warns = X.import_xlsx(data, cfg, schema=SCHEMA)
+    assert warns == [] and back.devices[0].points[0].name == "=1+1"
+    assert back.devices[0].description == "=1+1"
+
+
+def test_row_cap_stops_reading():
+    rows = [["name"], *([f"d{i}"] for i in range(10))]
+    data = _book({"Devices": rows, "Points": [["device", "name"]]})
+    small = X.XlsxSchema(list(SCHEMA.sheets.values()), build=build, model=Config, max_rows=5)
+    cfg, errors = small.import_xlsx(data)
+    assert cfg is None and errors == ["Devices: more than 5 rows (row limit), import refused"]
+    assert X.XlsxSchema(list(SCHEMA.sheets.values()), build=build, model=Config).max_rows == X.MAX_ROWS
+    cfg, errors = SCHEMA.import_xlsx(data)
+    assert cfg is not None and len(cfg.devices) == 10
+    # a per-sheet cap overrides the schema default
+    import dataclasses
+    capped = [dataclasses.replace(SCHEMA.sheets["Devices"], max_rows=3), SCHEMA.sheets["Points"]]
+    cfg, errors = X.XlsxSchema(capped, build=build, model=Config).import_xlsx(data)
+    assert errors == ["Devices: more than 3 rows (row limit), import refused"]

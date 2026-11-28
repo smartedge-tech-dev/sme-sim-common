@@ -199,3 +199,23 @@ def test_fastapi_app_and_api_router(env, tmp_path):
     with TestClient(app) as c:
         assert c.get("/api/ping").json() == {"pong": True}
         assert c.get("/api/version").status_code == 200
+
+
+def test_import_size_limit(tmp_path):
+    engine = Engine(parse_text(YAML, Config), config_text=YAML)
+    data = SCHEMA.export_xlsx(engine.config)[0]
+    app = make_base_app(engine, xlsx=SCHEMA, max_import_bytes=len(data) // 2)
+    with TestClient(app) as c:
+        r = c.post("/api/config/import", files={"file": ("book.xlsx", io.BytesIO(data), "application/octet-stream")})
+        assert r.status_code == 413 and "import size limit" in r.json()["error"]
+
+        # without Content-Length (chunked body) the stream is still capped
+        def chunks():
+            yield b"x" * len(data)
+
+        r = c.post("/api/config/import", content=chunks(),
+                   headers={"content-type": "multipart/form-data; boundary=b"})
+        assert r.status_code == 413
+    with TestClient(make_base_app(engine, xlsx=SCHEMA, max_import_bytes=len(data) * 2)) as c:
+        r = c.post("/api/config/import", files={"file": ("book.xlsx", io.BytesIO(data), "application/octet-stream")})
+        assert r.status_code == 200
