@@ -6,8 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-28
+
 ### Added
 - README: "What belongs in common" (product first, promote later; hooks, not protocols).
+- `make_base_app(..., max_import_bytes=MAX_IMPORT_BYTES)` (default 10 MiB): `POST /api/config/import` refuses a
+  larger request body with 413 before parsing it (Content-Length checked first, the body stream is capped too).
+- `XlsxSchema(..., max_rows=MAX_ROWS)` (default 50 000) and `Sheet(..., max_rows=None)` (per-sheet override):
+  `read_sheet` stops at the cap and the import fails with `"<sheet>: more than N rows (row limit), import
+  refused"`, so a crafted workbook cannot exhaust memory in read-only mode.
+
+### Fixed
+- `XlsxSchema.write` writes a text starting with `=`, `+`, `-`, `@`, `＠`, tab or CR (`FORMULA_PREFIXES`) as a
+  literal string with a quote prefix. openpyxl stored `=...` as a formula, so such a value did not round-trip.
+- `BaseEngine._run` waits with `asyncio.timeout` instead of `asyncio.wait_for`, which on Python 3.11 swallowed a
+  cancel arriving together with a wake-up and kept the engine task running.
 
 ## [1.2.0] - 2026-11-26
 

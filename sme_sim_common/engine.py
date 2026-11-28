@@ -312,9 +312,12 @@ class BaseEngine(abc.ABC):
                 wake.clear()  # the due tick covers a pending wake-up
                 await self._guarded(self.tick, "tick")
                 nxt = max(nxt + self.tick_seconds, loop.time())
+            # asyncio.timeout, not wait_for: on Python 3.11 wait_for returns the inner result when a cancel
+            # arrives just as wake.wait() completes, swallowing the cancellation and keeping the task alive.
             try:
-                await asyncio.wait_for(wake.wait(), max(0.0, nxt - loop.time()))
-            except asyncio.TimeoutError:
+                async with asyncio.timeout(max(0.0, nxt - loop.time())):
+                    await wake.wait()
+            except TimeoutError:
                 continue
             wake.clear()
             if loop.time() < nxt:  # woken between ticks: scan / push only, the schedule is unchanged

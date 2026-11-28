@@ -132,3 +132,24 @@ def test_tick_loop_runs():
         assert len(e.steps) >= 2
 
     asyncio.run(main())
+
+
+@pytest.mark.parametrize("racing_wake", [False, True])
+def test_cancel_really_cancels_the_loop(racing_wake):
+    # Cancel the task directly (not stop(): _stopping would end the loop anyway). With racing_wake the wake-up
+    # completes in the same loop iteration as the cancel, which asyncio.wait_for swallowed on Python 3.11.
+    async def main():
+        e = make()
+        e.tick_seconds = 3600.0
+        await e.start()
+        for _ in range(5):
+            await asyncio.sleep(0)  # first tick done, now waiting for the next one
+        task = e._task
+        if racing_wake:
+            e.wake()
+        task.cancel()
+        done, _ = await asyncio.wait({task}, timeout=2)
+        assert task in done and task.cancelled()
+        await e.stop()
+
+    asyncio.run(main())
