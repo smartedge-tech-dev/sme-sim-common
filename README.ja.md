@@ -146,6 +146,49 @@ def test_no_reserved_i18n_keys():
   リスト項目だけを置き換え、該当がなければ `item` を末尾に追加し、`item=None` なら削除します。
   他の項目の行とコメントはそのまま残ります。
 
+### MCP エンドポイント・`/healthz`・JSON ログ
+
+`pip install "sme-sim-common[mcp]"` で公式 `mcp` SDK (2.x) が入る。製品はツール (通常は既存 HTTP API 操作
+1 つにつき 1 つ) を登録し、Web UI と同じポートの `/mcp` (MCP streamable HTTP、stateless、JSON 応答) で公開する。
+
+```python
+from sme_sim_common.logs import setup_logging
+from sme_sim_common.mcp_server import McpRegistry, ToolError, register_base_tools
+
+setup_logging(verbose=args.verbose, log_format=args.log_format)   # add_common_args(..., log_format=True)
+app = make_base_app(engine, ...)
+
+mcp = McpRegistry("sme-ocpp-sim", version=__version__)
+register_base_tools(mcp, app)        # get_version, get_state, export_config, set_simulation
+mcp.register_http_tool("list_chargers", "List the simulated charge points.", "GET", "/api/chargers")
+mcp.register_http_tool("plug_in", "Plug a vehicle into a connector.", "POST",
+                       "/api/chargers/{id}/plug", PlugArgs)    # pydantic model -> inputSchema
+
+@mcp.tool(input_schema={"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]})
+async def charger_meter(args):
+    """Current meter value of one charge point (Wh)."""
+    cp = engine.find(args["id"])
+    if cp is None:
+        raise ToolError(f"unknown charge point {args['id']}")
+    return {"id": cp.id, "wh": cp.meter_wh}
+
+mcp.mount(app, host=args.host)       # before run_web(app, args)
+```
+
+```bash
+claude mcp add --transport http sme-ocpp-sim http://127.0.0.1:8082/mcp
+```
+
+- `register_tool(name, description, input_schema=None, handler=None, *, read_only=None, destructive=None)`。
+  `input_schema` は JSON schema dict (`type: object`)・pydantic モデル・`None`。handler は async 可。
+- `ToolError`・`bad(...)`・`ValueError` 等は MCP ツールエラー (`isError: true`) になる。未知のツール名は
+  JSON-RPC エラー (`-32602`)。
+- `register_http_tool(...)` は製品自身のルートをプロセス内で呼ぶ (Web UI と同じ検証・フック)。
+- `mount(app, host=args.host)`: ループバック host では非ループバックの `Host` / `Origin` を拒否する。認証はない。
+- stdio は `await mcp.run_stdio(app)`。`make_base_app` は常に `GET /healthz` を提供する。
+- `logs.setup_logging(verbose=, log_format="text"|"json")`。`add_common_args(..., log_format=True)` で
+  `--log-format` が増える。詳細は英語版 README を参照。
+
 ### 移行時の注意
 
 - `state` は `BaseEngine` のインスタンス属性（`_build` の結果）です。サブクラスで `state()` メソッドを定義してはいけません。

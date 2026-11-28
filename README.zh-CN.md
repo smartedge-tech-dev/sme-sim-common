@@ -143,6 +143,48 @@ def test_no_reserved_i18n_keys():
 - `replace_yaml_list_item(text, "chargers", "id", "0123", item)`：只替换 `id` 等于 `"0123"`（按 `str`
   比较）的列表项；没有则把 `item` 追加到末尾；`item=None` 时删除该项。其它项的行和注释原样保留。
 
+### MCP 端点、`/healthz`、JSON 日志
+
+`pip install "sme-sim-common[mcp]"` 引入官方 `mcp` SDK (2.x)。产品注册工具（通常每个现有 HTTP API 操作一个），
+在 Web UI 同一端口的 `/mcp` 上提供（MCP streamable HTTP，stateless，JSON 响应），不需要额外端口。
+
+```python
+from sme_sim_common.logs import setup_logging
+from sme_sim_common.mcp_server import McpRegistry, ToolError, register_base_tools
+
+setup_logging(verbose=args.verbose, log_format=args.log_format)   # add_common_args(..., log_format=True)
+app = make_base_app(engine, ...)
+
+mcp = McpRegistry("sme-ocpp-sim", version=__version__)
+register_base_tools(mcp, app)        # get_version, get_state, export_config, set_simulation
+mcp.register_http_tool("list_chargers", "List the simulated charge points.", "GET", "/api/chargers")
+mcp.register_http_tool("plug_in", "Plug a vehicle into a connector.", "POST",
+                       "/api/chargers/{id}/plug", PlugArgs)    # pydantic model -> inputSchema
+
+@mcp.tool(input_schema={"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]})
+async def charger_meter(args):
+    """Current meter value of one charge point (Wh)."""
+    cp = engine.find(args["id"])
+    if cp is None:
+        raise ToolError(f"unknown charge point {args['id']}")
+    return {"id": cp.id, "wh": cp.meter_wh}
+
+mcp.mount(app, host=args.host)       # before run_web(app, args)
+```
+
+```bash
+claude mcp add --transport http sme-ocpp-sim http://127.0.0.1:8082/mcp
+```
+
+- `register_tool(name, description, input_schema=None, handler=None, *, read_only=None, destructive=None)`；
+  `input_schema` 为 JSON schema dict（`type: object`）、pydantic 模型或 `None`；handler 可以是 async。
+- `ToolError`、`bad(...)`、`ValueError` 等变为 MCP 工具错误（`isError: true`）；未知工具名为 JSON-RPC 错误（`-32602`）。
+- `register_http_tool(...)` 在进程内调用产品自己的路由（与 Web UI 相同的校验和 hook）。
+- `mount(app, host=args.host)`：loopback host 下拒绝非 loopback 的 `Host` / `Origin`。没有认证。
+- stdio：`await mcp.run_stdio(app)`。`make_base_app` 始终提供 `GET /healthz`。
+- `logs.setup_logging(verbose=, log_format="text"|"json")`；`add_common_args(..., log_format=True)` 增加
+  `--log-format`。详见英文 README。
+
 ### 迁移注意事项
 
 - `state` 是 `BaseEngine` 的实例属性（`_build` 的结果）；子类不能定义 `state()` 方法。

@@ -15,6 +15,7 @@ MIT-licensed, developed by [smart-edge (智届科技)](https://smartedge-tech.co
 ```bash
 pip install "sme-sim-common>=1.0,<2"          # in a product's pyproject.toml dependencies
 pip install "sme-sim-common[xlsx]>=1.0,<2"    # with the .xlsx import / export helpers (openpyxl)
+pip install "sme-sim-common[mcp]>=1.3,<2"     # with the MCP server skeleton (official mcp SDK)
 pip install -e ../sme-sim-common              # local development against a checkout
 ```
 
@@ -151,6 +152,66 @@ fall back to rewriting more when the layout is unusual.
 - `replace_yaml_list_item(text, "chargers", "id", "0123", item)` replaces only the list item whose `id`
   equals `"0123"` (compared as `str`), appends `item` when there is none, or deletes it with `item=None`;
   the other items keep their lines and comments.
+
+### MCP endpoint, `/healthz`, JSON logs
+
+`pip install "sme-sim-common[mcp]"` adds the official `mcp` SDK (2.x). The product registers tools, usually
+one per existing HTTP API operation, and serves them on its own web port at `/mcp` (MCP streamable HTTP,
+stateless, JSON responses); there is no extra port.
+
+```python
+from sme_sim_common.logs import setup_logging
+from sme_sim_common.mcp_server import McpRegistry, ToolError, register_base_tools
+
+setup_logging(verbose=args.verbose, log_format=args.log_format)   # add_common_args(..., log_format=True)
+app = make_base_app(engine, ...)
+
+mcp = McpRegistry("sme-ocpp-sim", version=__version__)
+register_base_tools(mcp, app)        # get_version, get_state, export_config, set_simulation
+mcp.register_http_tool("list_chargers", "List the simulated charge points.", "GET", "/api/chargers")
+mcp.register_http_tool("plug_in", "Plug a vehicle into a connector.", "POST",
+                       "/api/chargers/{id}/plug", PlugArgs)    # pydantic model -> inputSchema
+
+@mcp.tool(input_schema={"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]})
+async def charger_meter(args):
+    """Current meter value of one charge point (Wh)."""
+    cp = engine.find(args["id"])
+    if cp is None:
+        raise ToolError(f"unknown charge point {args['id']}")
+    return {"id": cp.id, "wh": cp.meter_wh}
+
+mcp.mount(app, host=args.host)       # before run_web(app, args)
+```
+
+```bash
+claude mcp add --transport http sme-ocpp-sim http://127.0.0.1:8082/mcp
+```
+
+- `register_tool(name, description, input_schema=None, handler=None, *, read_only=None, destructive=None)`;
+  `input_schema` is a JSON schema dict (`type: object`), a pydantic model class (the handler then receives a
+  validated instance) or `None`. Handlers may be async. A `str` result is text, a `dict` is JSON text plus
+  `structuredContent`.
+- Errors: `ToolError`, `bad(...)` / `HTTPException`, `ValueError`, `TypeError`, `LookupError` and argument
+  validation errors (pydantic model or JSON schema dict) become MCP tool errors (`isError: true`) with the message; other exceptions are logged
+  and returned as tool errors too. An unknown tool name is a JSON-RPC error (`-32602`).
+- `register_http_tool(name, description, method, path, input_schema=None, *, body="json")` calls the
+  product's own route in-process (same validation and hooks as the web UI). `{param}` in `path` comes from the
+  argument of that name; the rest is the JSON body (`body="text"`: the `body` argument as text; `GET`: query
+  parameters). A status >= 400 is a tool error.
+- `mount(app, path="/mcp", *, host=None)`: on a loopback `host` (the default) requests with a non-loopback
+  `Host` / `Origin` header are refused (DNS-rebinding protection of `/mcp` only; the `/api/*` routes are
+  unchanged). Pass `args.host`, so `--host 0.0.0.0` (Docker) accepts the LAN host name. Like the web UI, the
+  endpoint has no authentication.
+- stdio: `await mcp.run_stdio(app)` runs the app lifespan (engine) and serves MCP on stdin/stdout, for
+  clients that launch the simulator themselves. Root log handlers on stdout are moved to stderr; the product
+  must not `print` to stdout in that mode. Claude Desktop can also reach the
+  HTTP endpoint through a stdio bridge such as `npx mcp-remote http://127.0.0.1:8082/mcp`.
+- `make_base_app` always serves `GET /healthz` (`{"status": "ok", ...}`, for Docker / k8s probes).
+- `logs.setup_logging(verbose=, log_format="text"|"json")` replaces `logging.basicConfig`; `json` writes one
+  object per line (`ts`, `level`, `logger`, `message`, `extra` fields, `exc`). `add_common_args(...,
+  log_format=True)` adds `--log-format`, and `run_web` then routes uvicorn's logs through the same handler. A
+  product that keeps `log_format: json` in its config passes that value to `setup_logging` and sets
+  `args.log_format` to it before `run_web`.
 
 ### Migration notes
 
