@@ -20,11 +20,13 @@ LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 
 def add_common_args(ap: argparse.ArgumentParser, *, default_http_port: int, app_name: str,
                     version: Optional[str] = None, templates: bool = True,
-                    open_browser: bool = True) -> argparse.ArgumentParser:
+                    open_browser: bool = True, log_format: bool = False) -> argparse.ArgumentParser:
     """Add ``-c/--config``, ``--host`` (127.0.0.1), ``--http-port`` (hidden alias ``--port``), ``--no-browser`` /
     ``--browser``, ``--version``, ``-v/--verbose`` and (``templates=True``) ``--templates-dir``. The product passes
     its own default port (series port table in the README); ``app_name`` is the dist name (``sme-modbus-sim``).
-    ``open_browser`` is the default of ``args.no_browser`` (inverted): ``False`` = only ``--browser`` opens it."""
+    ``open_browser`` is the default of ``args.no_browser`` (inverted): ``False`` = only ``--browser`` opens it.
+    ``log_format=True`` adds ``--log-format {text,json}`` (default ``None`` = not given, so a config file value can
+    apply; pass the result to :func:`sme_sim_common.logs.setup_logging`)."""
     if version is not None:
         ap.add_argument("--version", action="version", version=f"{app_name} {version}")
     ap.add_argument("-c", "--config", help="YAML / JSON config file")
@@ -45,6 +47,11 @@ def add_common_args(ap: argparse.ArgumentParser, *, default_http_port: int, app_
         ap.add_argument("--templates-dir",
                         help=f"user template directory (default: ${env} or ~/.{app_name}/templates)")
     ap.add_argument("-v", "--verbose", action="store_true", help="debug logging")
+    if log_format:
+        from .logs import LOG_FORMATS
+
+        ap.add_argument("--log-format", dest="log_format", choices=LOG_FORMATS, default=None,
+                        help="log output: text (default) or json (one JSON object per line)")
     return ap
 
 
@@ -60,7 +67,8 @@ def run_web(app: Any, args: argparse.Namespace, *, name: Optional[str] = None, d
     """Serve ``app`` with uvicorn (``log_level="warning"``) on ``args.host`` / ``args.http_port``.
 
     Prints the URL, warns when the host is not loopback (the UI has no authentication) and opens the browser
-    unless ``--no-browser``."""
+    unless ``--no-browser``. With ``args.log_format == "json"`` uvicorn keeps no handlers of its own, so its logs
+    go through the root handler of :func:`sme_sim_common.logs.setup_logging` (JSON too)."""
     import uvicorn
 
     url = browser_url(args.host, args.http_port)
@@ -70,7 +78,8 @@ def run_web(app: Any, args: argparse.Namespace, *, name: Optional[str] = None, d
               f"authentication. Use --host 127.0.0.1 unless you need LAN access.", file=sys.stderr, flush=True)
     if not getattr(args, "no_browser", False):
         threading.Timer(delay, lambda: webbrowser.open(url)).start()
-    uvicorn.run(app, host=args.host, port=args.http_port, log_level="warning")
+    extra = {"log_config": None} if getattr(args, "log_format", None) == "json" else {}
+    uvicorn.run(app, host=args.host, port=args.http_port, log_level="warning", **extra)
 
 
 def add_validate_args(ap: argparse.ArgumentParser, *, templates: bool = True) -> argparse.ArgumentParser:

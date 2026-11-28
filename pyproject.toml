@@ -24,7 +24,8 @@ dependencies = [
 
 [project.optional-dependencies]
 xlsx = ["openpyxl>=3.1"]
-dev = ["pytest", "httpx", "openpyxl>=3.1", "pyinstaller"]
+mcp = ["mcp>=2.3,<3"]
+dev = ["pytest", "httpx", "openpyxl>=3.1", "pyinstaller", "mcp>=2.3,<3"]
 
 [project.urls]
 Homepage = "https://github.com/smartedge-tech-dev/sme-sim-common"

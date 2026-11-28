@@ -147,7 +147,8 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
     Their routes are flattened into ``app.routes`` (FastAPI ``APIRoute`` objects, dependency injection intact).
 
     ``engine`` follows :class:`sme_sim_common.engine.EngineProtocol`. Always present: ``GET /``, ``/static``
-    (when ``static_dir`` exists), ``/sme-sim-common``, ``GET /api/version``, ``GET /api/state``,
+    (when ``static_dir`` exists), ``/sme-sim-common``, ``GET /healthz`` (liveness probe, ``{"status": "ok"}``),
+    ``GET /api/version``, ``GET /api/state``,
     ``GET|PUT /api/config`` (YAML text), ``POST /api/config/save`` (``engine.config_text`` written atomically),
     ``WS /ws``. Per feature:
 
@@ -240,6 +241,10 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
     async def api_version(request: Request):
         return JSONResponse({"name": title, "version": version, "common_version": common_version})
 
+    async def healthz(request: Request):
+        return JSONResponse({"status": "ok", "name": title, "version": version, "common_version": common_version},
+                            headers={"Cache-Control": "no-store"})
+
     async def api_state(request: Request):
         return JSONResponse(engine.snapshot())
 
@@ -265,7 +270,8 @@ def make_base_app(engine, *, config_path: Optional[Union[str, Path]] = None,
         engine.log_event("config", f"configuration saved to {save_path}")
         return JSONResponse({"ok": True, "path": str(save_path)})
 
-    routes: list = [Route("/api/version", api_version), Route("/api/state", api_state),
+    routes: list = [Route("/healthz", healthz),
+                    Route("/api/version", api_version), Route("/api/state", api_state),
                     Route("/api/config", config_get, methods=["GET"]),
                     Route("/api/config", config_put, methods=["PUT"]),
                     Route("/api/config/save", config_save, methods=["POST"])]

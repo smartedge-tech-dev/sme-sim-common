@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Planned as 1.3.0.
+
+### Added
+- `sme_sim_common.mcp_server` (optional extra `sme-sim-common[mcp]`, official `mcp` SDK `>=2.3,<3`): an MCP
+  server skeleton. `McpRegistry(name, version).register_tool(name, description, input_schema, handler)`
+  (JSON schema dict or pydantic model; sync or async handler; `ToolError` / `bad()` / `ValueError` ... become
+  MCP tool errors), `@registry.tool(...)`, `register_http_tool(name, description, method, path, ...)` (wraps
+  one of the product's own routes, called in-process), `register_base_tools(registry, app)` (`get_version`,
+  `get_state`, `export_config`, `set_simulation`), `mount(app, "/mcp", host=...)` (streamable HTTP on the
+  product's own port, stateless, DNS-rebinding protection on loopback) and `run_stdio(app)`.
+- `make_base_app`: `GET /healthz` (`{"status": "ok", "name", "version", "common_version"}`).
+- `sme_sim_common.logs`: `setup_logging(verbose=, log_format="text"|"json")` and `JsonFormatter` (one JSON
+  object per line). `add_common_args(..., log_format=True)` adds `--log-format {text,json}`; `run_web` passes
+  uvicorn `log_config=None` for `json` so its logs use the same handler.
+- PyInstaller hook: bundles `mcp` / `mcp_types` when the build environment has them.
+
 ## [1.2.1] - 2026-11-28
 
 ### Added
